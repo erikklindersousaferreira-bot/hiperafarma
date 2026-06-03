@@ -53,6 +53,8 @@ const statusLabel = { pendente: "Pendente", em_andamento: "Em andamento", entreg
 const categoriaLabel = { generico: "Genérico", etico: "Ético", equipamento: "Equipamento", outro: "Outro" };
 const categoriaCor = { generico: C.azulClaro, etico: "#7C3AED", equipamento: C.laranja, outro: C.cinzaT };
 
+const escHtml = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
 // =============================================
 // ÍCONES SVG
 // =============================================
@@ -76,9 +78,11 @@ const Icon = ({ name, size = 20, color = "currentColor" }) => {
     filtro: <><polygon points="22,3 2,3 10,12.46 10,19 14,21 14,12.46 22,3"/></>,
     lupa: <><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></>,
     msg: <><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></>,
-    configs: <><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/></>,
     farmaciaIcon: <><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></>,
     cruz: <><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>,
+    lapis: <><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></>,
+    lixeira: <><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></>,
+    laboratorio: <><line x1="9" y1="3" x2="15" y2="3"/><polyline points="9,3 5,20 19,20 15,3"/><line x1="7" y1="13" x2="17" y2="13"/></>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -116,6 +120,24 @@ const Btn = ({ children, onClick, cor = C.azul, outline = false, small = false, 
     fontFamily: "inherit",
   }}>
     {children}
+  </button>
+);
+
+const BtnIcon = ({ icon, onClick, cor = C.cinzaT, title = "" }) => (
+  <button onClick={onClick} title={title} style={{
+    background: cor + "15",
+    color: cor,
+    border: `1.5px solid ${cor}30`,
+    borderRadius: 8,
+    padding: "6px 8px",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    transition: "all 0.15s",
+    fontFamily: "inherit",
+  }}>
+    <Icon name={icon} size={15} color={cor} />
   </button>
 );
 
@@ -200,19 +222,22 @@ const Login = ({ onLogin }) => {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: `linear-gradient(135deg, ${C.azul} 0%, ${C.azulClaro} 50%, #3B6FD4 100%)`, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div style={{ background: C.branco, borderRadius: 24, padding: 40, width: "100%", maxWidth: 420, boxShadow: "0 24px 80px rgba(0,0,0,0.25)" }}>
+    <div style={{
+      minHeight: "100vh",
+      background: `linear-gradient(135deg, ${C.azul} 0%, ${C.azulClaro} 50%, #3B6FD4 100%)`,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontFamily: "'Inter', sans-serif",
+    }}>
+      <div style={{ background: C.branco, borderRadius: 24, padding: 40, width: "100%", maxWidth: 420, margin: 16, boxShadow: "0 24px 80px rgba(0,0,0,0.25)" }}>
         {/* Logo */}
         <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{ width: 72, height: 72, background: `linear-gradient(135deg, ${C.azul}, ${C.azulClaro})`, borderRadius: 20, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
-            <svg width="38" height="38" viewBox="0 0 24 24" fill="none">
-              <line x1="12" y1="5" x2="12" y2="19" stroke="white" strokeWidth="3" strokeLinecap="round"/>
-              <line x1="5" y1="12" x2="19" y2="12" stroke={C.amarelo} strokeWidth="3" strokeLinecap="round"/>
-            </svg>
-          </div>
-          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800, color: C.azul, letterSpacing: -0.5 }}>
-            Hipera<span style={{ color: C.amarelo }}>farma</span>
-          </h1>
+          <img
+            src="https://i.postimg.cc/pVwVTC9j/LOGO-VERTICALL-EM-PNG.png"
+            alt="Hiperafarma"
+            style={{ width: 190, height: "auto", marginBottom: 8 }}
+          />
           <p style={{ margin: "4px 0 0", color: C.cinzaT, fontSize: 13 }}>Drogarias — Sistema de Gestão</p>
         </div>
 
@@ -248,6 +273,7 @@ const Sidebar = ({ ativo, setAtivo, isDono, farmacia, onSair }) => {
     { id: "pedidos", label: "Pedidos", icon: "pedidos" },
     { id: "manutencoes", label: "Manutenções", icon: "manutencao" },
     { id: "farmacias", label: "Farmácias", icon: "farmacias" },
+    { id: "laboratorios", label: "Laboratórios", icon: "laboratorio" },
     { id: "graficos", label: "Relatórios", icon: "grafico" },
     { id: "previsao", label: "Previsão", icon: "previsao" },
   ];
@@ -263,19 +289,14 @@ const Sidebar = ({ ativo, setAtivo, isDono, farmacia, onSair }) => {
     <div style={{ width: 240, minHeight: "100vh", background: C.azul, display: "flex", flexDirection: "column", flexShrink: 0 }}>
       {/* Logo */}
       <div style={{ padding: "24px 20px 20px", borderBottom: `1px solid rgba(255,255,255,0.1)` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 40, height: 40, background: C.amarelo, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <line x1="12" y1="5" x2="12" y2="19" stroke={C.azul} strokeWidth="3" strokeLinecap="round"/>
-              <line x1="5" y1="12" x2="19" y2="12" stroke={C.azul} strokeWidth="3" strokeLinecap="round"/>
-            </svg>
-          </div>
-          <div>
-            <div style={{ color: C.branco, fontWeight: 800, fontSize: 15, lineHeight: 1 }}>Hipera<span style={{ color: C.amarelo }}>farma</span></div>
-            <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 10, marginTop: 2 }}>Drogarias</div>
-          </div>
+        <div style={{ marginBottom: 16 }}>
+          <img
+            src="https://i.postimg.cc/J7f7nxyB/LOGO-HORIZONTAL-EM-PNG.png"
+            alt="Hiperafarma"
+            style={{ width: "100%", maxWidth: 160, height: "auto", display: "block" }}
+          />
         </div>
-        <div style={{ marginTop: 16, background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}>
+        <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}>
           <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 10, marginBottom: 2 }}>{isDono ? "ADMINISTRADOR" : "FARMÁCIA"}</div>
           <div style={{ color: C.branco, fontWeight: 700, fontSize: 13 }}>{farmacia.nome}</div>
         </div>
@@ -336,7 +357,6 @@ const Dashboard = ({ stats, pedidos, manutencoes, farmacias }) => {
       <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Painel Central</h2>
       <p style={{ margin: "0 0 28px", color: C.cinzaT, fontSize: 14 }}>Visão geral da rede Hiperafarma</p>
 
-      {/* Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16, marginBottom: 28 }}>
         {cards.map(c => (
           <Card key={c.label} style={{ borderTop: `4px solid ${c.cor}`, padding: 20 }}>
@@ -351,7 +371,6 @@ const Dashboard = ({ stats, pedidos, manutencoes, farmacias }) => {
         ))}
       </div>
 
-      {/* Últimos pedidos */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
         <Card>
           <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700, color: C.preto, display: "flex", alignItems: "center", gap: 8 }}>
@@ -413,6 +432,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   const [novoComentario, setNovoComentario] = useState("");
   const [geraPDF, setGeraPDF] = useState(false);
   const [labPDF, setLabPDF] = useState("");
+  const [loadingPDF, setLoadingPDF] = useState(false);
 
   const pedidosFiltrados = pedidos.filter(p => {
     if (filtroFarmacia && p.farmacia_id !== filtroFarmacia) return false;
@@ -423,8 +443,12 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
 
   const abrirPedido = async (pedido) => {
     setPedidoSelecionado(pedido);
-    const itens = await sb(`pedido_itens?pedido_id=eq.${pedido.id}&order=criado_em.asc`);
-    const comts = await sb(`comentarios?pedido_id=eq.${pedido.id}&order=criado_em.asc`);
+    setItensPedido([]);
+    setComentarios([]);
+    const [itens, comts] = await Promise.all([
+      sb(`pedido_itens?pedido_id=eq.${pedido.id}&order=criado_em.asc`),
+      sb(`comentarios?pedido_id=eq.${pedido.id}&order=criado_em.asc`),
+    ]);
     setItensPedido(itens);
     setComentarios(comts);
   };
@@ -444,15 +468,111 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     setPedidoSelecionado({ ...pedidoSelecionado, status: novoStatus });
   };
 
-  const gerarPDFLab = () => {
+  const gerarPDFLab = async () => {
     if (!labPDF) return;
     const lab = laboratorios.find(l => l.id === labPDF);
-    const itensDoCab = [];
-    pedidos.filter(p => p.status === "pendente" || p.status === "em_andamento").forEach(p => {
-      const farm = farmacias.find(f => f.id === p.farmacia_id);
-    });
-    alert(`PDF para o laboratório "${lab?.nome}" seria gerado aqui com todos os itens pendentes desse laboratório!`);
-    setGeraPDF(false);
+    setLoadingPDF(true);
+    try {
+      const pendingIds = pedidos
+        .filter(p => p.status === "pendente" || p.status === "em_andamento")
+        .map(p => p.id);
+
+      if (!pendingIds.length) {
+        alert("Nenhum pedido pendente ou em andamento encontrado.");
+        setLoadingPDF(false);
+        return;
+      }
+
+      const itens = await sb(`pedido_itens?laboratorio_id=eq.${labPDF}&pedido_id=in.(${pendingIds.join(",")})&order=nome_produto.asc`);
+
+      if (!itens.length) {
+        alert(`Nenhum item pendente para o laboratório "${lab?.nome}".`);
+        setLoadingPDF(false);
+        return;
+      }
+
+      const cats = { generico: "Genérico", etico: "Ético", equipamento: "Equipamento", outro: "Outro" };
+      const dataStr = new Date().toLocaleDateString("pt-BR");
+      const horaStr = new Date().toLocaleString("pt-BR");
+
+      const linhas = itens.map((item, i) => {
+        const pedido = pedidos.find(p => p.id === item.pedido_id);
+        const farm = farmacias.find(f => f.id === pedido?.farmacia_id);
+        return `<tr>
+          <td>${i + 1}</td>
+          <td><strong>${escHtml(item.nome_produto)}</strong></td>
+          <td>${escHtml(cats[item.categoria] || item.categoria)}</td>
+          <td>${escHtml(farm?.nome || "—")}</td>
+          <td style="text-align:center;font-weight:700;color:#1A3A8F">${item.quantidade}</td>
+        </tr>`;
+      }).join("");
+
+      const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Pedido ${escHtml(lab?.nome)} — ${dataStr}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; padding: 40px; color: #0F172A; font-size: 13px; }
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 3px solid #1A3A8F; }
+    .header img { height: 55px; }
+    .header-right { text-align: right; }
+    .lab-name { font-size: 20px; font-weight: 800; color: #1A3A8F; margin-bottom: 4px; }
+    .date { color: #6B7A99; font-size: 12px; }
+    h2 { font-size: 15px; font-weight: 700; color: #374151; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { background: #1A3A8F; color: #FFFFFF; }
+    th { padding: 10px 14px; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
+    td { padding: 10px 14px; border-bottom: 1px solid #E8ECF4; }
+    tr:nth-child(even) td { background: #F4F6FA; }
+    .footer { margin-top: 40px; font-size: 10px; color: #6B7A99; text-align: center; border-top: 1px solid #E8ECF4; padding-top: 16px; }
+    .total-row td { font-weight: 700; background: #EFF6FF; border-top: 2px solid #1A3A8F; }
+    @media print { body { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="https://i.postimg.cc/J7f7nxyB/LOGO-HORIZONTAL-EM-PNG.png" alt="Hiperafarma" onerror="this.style.display='none'">
+    <div class="header-right">
+      <div class="lab-name">${escHtml(lab?.nome || "Laboratório")}</div>
+      <div class="date">Data: ${dataStr}</div>
+      <div class="date">Itens pendentes e em andamento</div>
+    </div>
+  </div>
+  <h2>Lista de Itens — ${escHtml(lab?.nome || "Laboratório")}</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Produto</th>
+        <th>Categoria</th>
+        <th>Farmácia</th>
+        <th>Qtd</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${linhas}
+      <tr class="total-row">
+        <td colspan="4">Total de itens</td>
+        <td style="text-align:center">${itens.length}</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="footer">Hiperafarma Drogarias — Gerado em ${horaStr} — Documento de uso interno</div>
+  <script>window.onload = function() { window.print(); }</script>
+</body>
+</html>`;
+
+      const w = window.open("", "_blank");
+      if (!w) { alert("Pop-up bloqueado. Permita pop-ups para este site e tente novamente."); setLoadingPDF(false); return; }
+      w.document.write(html);
+      w.document.close();
+      setGeraPDF(false);
+    } catch (e) {
+      alert("Erro ao gerar PDF: " + e.message);
+    }
+    setLoadingPDF(false);
   };
 
   return (
@@ -546,20 +666,25 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
 
           <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>ITENS DO PEDIDO</h4>
           <div style={{ background: C.cinzaF, borderRadius: 12, overflow: "hidden", marginBottom: 20 }}>
-            {itensPedido.length === 0 ? <p style={{ padding: 16, color: C.cinzaT, margin: 0 }}>Carregando itens...</p> :
-              itensPedido.map((item, i) => (
-                <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: i < itensPedido.length - 1 ? `1px solid ${C.cinzaE}` : "none" }}>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 14, color: C.preto }}>{item.nome_produto}</div>
-                    <div style={{ fontSize: 12, color: C.cinzaT }}>{item.nome_laboratorio || "Sem laboratório"} • {categoriaLabel[item.categoria]}</div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <Badge label={categoriaLabel[item.categoria]} cor={categoriaCor[item.categoria]} />
-                    <span style={{ fontWeight: 700, fontSize: 16, color: C.azul }}>×{item.quantidade}</span>
+            {itensPedido.length === 0 ? (
+              <p style={{ padding: 16, color: C.cinzaT, margin: 0, textAlign: "center" }}>Carregando itens...</p>
+            ) : itensPedido.map((item, i) => (
+              <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: i < itensPedido.length - 1 ? `1px solid ${C.cinzaE}` : "none" }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: C.preto }}>{item.nome_produto}</div>
+                  <div style={{ fontSize: 12, color: C.cinzaT, marginTop: 2 }}>
+                    {item.nome_laboratorio ? `🏭 ${item.nome_laboratorio}` : "Sem laboratório"}
+                    {" • "}
+                    {categoriaLabel[item.categoria] || item.categoria}
+                    {item.motivo ? ` • ${item.motivo}` : ""}
                   </div>
                 </div>
-              ))
-            }
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <Badge label={categoriaLabel[item.categoria] || item.categoria} cor={categoriaCor[item.categoria] || C.cinzaT} />
+                  <span style={{ fontWeight: 800, fontSize: 18, color: C.azul, minWidth: 40, textAlign: "right" }}>×{item.quantidade}</span>
+                </div>
+              </div>
+            ))}
           </div>
 
           <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>ATUALIZAR STATUS</h4>
@@ -594,11 +719,13 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
       {/* Modal PDF */}
       {geraPDF && (
         <Modal title="Gerar PDF por Laboratório" onClose={() => setGeraPDF(false)} width={440}>
-          <p style={{ color: C.cinzaT, fontSize: 14, marginBottom: 20 }}>Selecione o laboratório para gerar o PDF com todos os itens pendentes.</p>
+          <p style={{ color: C.cinzaT, fontSize: 14, marginBottom: 20 }}>
+            Selecione o laboratório para gerar o PDF com todos os itens pendentes e em andamento.
+          </p>
           <Select label="Laboratório" value={labPDF} onChange={setLabPDF} options={laboratorios.map(l => ({ value: l.id, label: l.nome }))} />
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-            <Btn onClick={gerarPDFLab} cor={C.vermelho} disabled={!labPDF} full>
-              <Icon name="pdf" size={16} color={C.branco} /> Gerar PDF
+            <Btn onClick={gerarPDFLab} cor={C.vermelho} disabled={!labPDF || loadingPDF} full>
+              <Icon name="pdf" size={16} color={C.branco} /> {loadingPDF ? "Gerando..." : "Gerar e Imprimir PDF"}
             </Btn>
             <Btn onClick={() => setGeraPDF(false)} outline cor={C.cinzaT}>Cancelar</Btn>
           </div>
@@ -612,7 +739,8 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
 // FARMÁCIAS (gerenciar)
 // =============================================
 const GerenciarFarmacias = ({ farmacias, onAtualizar }) => {
-  const [modal, setModal] = useState(false);
+  // Modal novo cadastro
+  const [modalNovo, setModalNovo] = useState(false);
   const [nome, setNome] = useState("");
   const [usuario, setUsuario] = useState("");
   const [senha, setSenha] = useState("");
@@ -620,15 +748,73 @@ const GerenciarFarmacias = ({ farmacias, onAtualizar }) => {
   const [telefone, setTelefone] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Modal visualizar
+  const [modalVer, setModalVer] = useState(null);
+  const [pedidosFarm, setPedidosFarm] = useState([]);
+  const [loadingPedidos, setLoadingPedidos] = useState(false);
+
+  // Modal editar
+  const [modalEditar, setModalEditar] = useState(null);
+  const [editNome, setEditNome] = useState("");
+  const [editUsuario, setEditUsuario] = useState("");
+  const [editSenha, setEditSenha] = useState("");
+  const [editEndereco, setEditEndereco] = useState("");
+  const [editTelefone, setEditTelefone] = useState("");
+  const [loadingEditar, setLoadingEditar] = useState(false);
+
+  // Confirmar exclusão
+  const [confirmExcluir, setConfirmExcluir] = useState(null);
+
   const cadastrar = async () => {
     if (!nome || !usuario || !senha) return;
     setLoading(true);
     try {
       await sb("farmacias", { method: "POST", body: JSON.stringify({ nome, usuario, senha_hash: senha, endereco, telefone }) });
-      setModal(false); setNome(""); setUsuario(""); setSenha(""); setEndereco(""); setTelefone("");
+      setModalNovo(false); setNome(""); setUsuario(""); setSenha(""); setEndereco(""); setTelefone("");
       onAtualizar();
     } catch (e) { alert("Erro ao cadastrar: " + e.message); }
     setLoading(false);
+  };
+
+  const abrirVer = async (farm) => {
+    setModalVer(farm);
+    setLoadingPedidos(true);
+    setPedidosFarm([]);
+    try {
+      const peds = await sb(`pedidos?farmacia_id=eq.${farm.id}&order=criado_em.desc&limit=20`);
+      setPedidosFarm(peds);
+    } catch {}
+    setLoadingPedidos(false);
+  };
+
+  const abrirEditar = (farm) => {
+    setModalEditar(farm);
+    setEditNome(farm.nome || "");
+    setEditUsuario(farm.usuario || "");
+    setEditSenha("");
+    setEditEndereco(farm.endereco || "");
+    setEditTelefone(farm.telefone || "");
+  };
+
+  const salvarEdicao = async () => {
+    if (!editNome || !editUsuario) return;
+    setLoadingEditar(true);
+    try {
+      const body = { nome: editNome, usuario: editUsuario, endereco: editEndereco, telefone: editTelefone };
+      if (editSenha) body.senha_hash = editSenha;
+      await sb(`farmacias?id=eq.${modalEditar.id}`, { method: "PATCH", prefer: "return=minimal", body: JSON.stringify(body) });
+      setModalEditar(null);
+      onAtualizar();
+    } catch (e) { alert("Erro ao editar: " + e.message); }
+    setLoadingEditar(false);
+  };
+
+  const excluir = async (farm) => {
+    try {
+      await sb(`farmacias?id=eq.${farm.id}`, { method: "PATCH", prefer: "return=minimal", body: JSON.stringify({ ativa: false }) });
+      setConfirmExcluir(null);
+      onAtualizar();
+    } catch (e) { alert("Erro ao excluir: " + e.message); }
   };
 
   const listaFarmacias = farmacias.filter(f => f.usuario !== "admin");
@@ -640,30 +826,37 @@ const GerenciarFarmacias = ({ farmacias, onAtualizar }) => {
           <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Farmácias</h2>
           <p style={{ margin: 0, color: C.cinzaT, fontSize: 14 }}>{listaFarmacias.length} farmácias cadastradas</p>
         </div>
-        <Btn onClick={() => setModal(true)} cor={C.azul}><Icon name="mais" size={16} color={C.branco} /> Nova Farmácia</Btn>
+        <Btn onClick={() => setModalNovo(true)} cor={C.azul}><Icon name="mais" size={16} color={C.branco} /> Nova Farmácia</Btn>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
         {listaFarmacias.map(f => (
-          <Card key={f.id}>
+          <Card key={f.id} style={{ display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-              <div style={{ width: 44, height: 44, background: C.azul + "15", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ width: 44, height: 44, background: C.azul + "15", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                 <Icon name="farmacias" size={22} color={C.azul} />
               </div>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 15, color: C.preto }}>{f.nome}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: C.preto, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.nome}</div>
                 <div style={{ fontSize: 12, color: C.cinzaT }}>@{f.usuario}</div>
               </div>
               <Badge label={f.ativa ? "Ativa" : "Inativa"} cor={f.ativa ? C.verde : C.cinzaT} />
             </div>
             {f.endereco && <div style={{ fontSize: 13, color: C.cinzaT, marginBottom: 4 }}>📍 {f.endereco}</div>}
-            {f.telefone && <div style={{ fontSize: 13, color: C.cinzaT }}>📞 {f.telefone}</div>}
+            {f.telefone && <div style={{ fontSize: 13, color: C.cinzaT, marginBottom: 12 }}>📞 {f.telefone}</div>}
+            {/* Botões de ação */}
+            <div style={{ display: "flex", gap: 8, marginTop: "auto", paddingTop: 12, borderTop: `1px solid ${C.cinzaE}` }}>
+              <BtnIcon icon="olho" cor={C.azulClaro} title="Visualizar farmácia" onClick={e => { e.stopPropagation(); abrirVer(f); }} />
+              <BtnIcon icon="lapis" cor={C.laranja} title="Editar farmácia" onClick={e => { e.stopPropagation(); abrirEditar(f); }} />
+              <BtnIcon icon="lixeira" cor={C.vermelho} title="Desativar farmácia" onClick={e => { e.stopPropagation(); setConfirmExcluir(f); }} />
+            </div>
           </Card>
         ))}
       </div>
 
-      {modal && (
-        <Modal title="Cadastrar Nova Farmácia" onClose={() => setModal(false)}>
+      {/* Modal Novo */}
+      {modalNovo && (
+        <Modal title="Cadastrar Nova Farmácia" onClose={() => setModalNovo(false)}>
           <Input label="Nome da Farmácia" value={nome} onChange={setNome} placeholder="Ex: Hiperafarma Centro" required />
           <Input label="Usuário (login)" value={usuario} onChange={setUsuario} placeholder="Ex: hiperafarma_centro" required />
           <Input label="Senha" value={senha} onChange={setSenha} type="password" placeholder="Senha de acesso" required />
@@ -671,7 +864,221 @@ const GerenciarFarmacias = ({ farmacias, onAtualizar }) => {
           <Input label="Telefone" value={telefone} onChange={setTelefone} placeholder="(99) 99999-9999" />
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
             <Btn onClick={cadastrar} disabled={loading} cor={C.azul} full>{loading ? "Salvando..." : "Cadastrar Farmácia"}</Btn>
+            <Btn onClick={() => setModalNovo(false)} outline cor={C.cinzaT}>Cancelar</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal Visualizar */}
+      {modalVer && (
+        <Modal title={`Farmácia — ${modalVer.nome}`} onClose={() => setModalVer(null)} width={620}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
+            <div style={{ background: C.cinzaF, borderRadius: 12, padding: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.cinzaT, marginBottom: 4 }}>NOME</div>
+              <div style={{ fontWeight: 600, fontSize: 14, color: C.preto }}>{modalVer.nome}</div>
+            </div>
+            <div style={{ background: C.cinzaF, borderRadius: 12, padding: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.cinzaT, marginBottom: 4 }}>USUÁRIO</div>
+              <div style={{ fontWeight: 600, fontSize: 14, color: C.preto }}>@{modalVer.usuario}</div>
+            </div>
+            {modalVer.endereco && (
+              <div style={{ background: C.cinzaF, borderRadius: 12, padding: 16, gridColumn: "1 / -1" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.cinzaT, marginBottom: 4 }}>ENDEREÇO</div>
+                <div style={{ fontWeight: 600, fontSize: 14, color: C.preto }}>{modalVer.endereco}</div>
+              </div>
+            )}
+            {modalVer.telefone && (
+              <div style={{ background: C.cinzaF, borderRadius: 12, padding: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.cinzaT, marginBottom: 4 }}>TELEFONE</div>
+                <div style={{ fontWeight: 600, fontSize: 14, color: C.preto }}>{modalVer.telefone}</div>
+              </div>
+            )}
+            <div style={{ background: C.cinzaF, borderRadius: 12, padding: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.cinzaT, marginBottom: 4 }}>STATUS</div>
+              <Badge label={modalVer.ativa ? "Ativa" : "Inativa"} cor={modalVer.ativa ? C.verde : C.cinzaT} />
+            </div>
+          </div>
+
+          <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>PEDIDOS RECENTES</h4>
+          {loadingPedidos ? (
+            <p style={{ color: C.cinzaT, fontSize: 14 }}>Carregando pedidos...</p>
+          ) : pedidosFarm.length === 0 ? (
+            <div style={{ background: C.cinzaF, borderRadius: 12, padding: 16, textAlign: "center", color: C.cinzaT, fontSize: 14 }}>
+              Nenhum pedido encontrado para esta farmácia.
+            </div>
+          ) : (
+            <div style={{ background: C.cinzaF, borderRadius: 12, overflow: "hidden" }}>
+              {pedidosFarm.map((p, i) => (
+                <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: i < pedidosFarm.length - 1 ? `1px solid ${C.cinzaE}` : "none" }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: C.preto }}>Pedido #{p.id.slice(0, 8).toUpperCase()}</div>
+                    <div style={{ fontSize: 11, color: C.cinzaT }}>{new Date(p.criado_em).toLocaleString("pt-BR")}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
+                    <Badge label={statusLabel[p.status]} cor={statusCor[p.status]} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* Modal Editar */}
+      {modalEditar && (
+        <Modal title={`Editar — ${modalEditar.nome}`} onClose={() => setModalEditar(null)}>
+          <Input label="Nome da Farmácia" value={editNome} onChange={setEditNome} placeholder="Nome da farmácia" required />
+          <Input label="Usuário (login)" value={editUsuario} onChange={setEditUsuario} placeholder="Usuário de acesso" required />
+          <Input label="Nova Senha (deixe em branco para não alterar)" value={editSenha} onChange={setEditSenha} type="password" placeholder="Nova senha" />
+          <Input label="Endereço" value={editEndereco} onChange={setEditEndereco} placeholder="Rua, número, bairro" />
+          <Input label="Telefone" value={editTelefone} onChange={setEditTelefone} placeholder="(99) 99999-9999" />
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            <Btn onClick={salvarEdicao} disabled={loadingEditar} cor={C.azul} full>
+              <Icon name="check" size={16} color={C.branco} /> {loadingEditar ? "Salvando..." : "Salvar Alterações"}
+            </Btn>
+            <Btn onClick={() => setModalEditar(null)} outline cor={C.cinzaT}>Cancelar</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {/* Confirmar Exclusão */}
+      {confirmExcluir && (
+        <Modal title="Confirmar Desativação" onClose={() => setConfirmExcluir(null)} width={400}>
+          <p style={{ color: C.cinzaP, fontSize: 14, marginBottom: 8 }}>
+            Deseja desativar a farmácia <strong>{confirmExcluir.nome}</strong>?
+          </p>
+          <p style={{ color: C.cinzaT, fontSize: 13, marginBottom: 24 }}>
+            A farmácia ficará inativa e não poderá mais acessar o sistema. Esta ação pode ser desfeita editando a farmácia.
+          </p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Btn onClick={() => excluir(confirmExcluir)} cor={C.vermelho} full>
+              <Icon name="lixeira" size={16} color={C.branco} /> Confirmar Desativação
+            </Btn>
+            <Btn onClick={() => setConfirmExcluir(null)} outline cor={C.cinzaT}>Cancelar</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// =============================================
+// LABORATÓRIOS (gerenciar)
+// =============================================
+const GerenciarLaboratorios = ({ laboratorios, onAtualizar }) => {
+  const [modal, setModal] = useState(false);
+  const [labSelecionado, setLabSelecionado] = useState(null);
+  const [nome, setNome] = useState("");
+  const [contato, setContato] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [confirmExcluir, setConfirmExcluir] = useState(null);
+
+  const abrirNovo = () => {
+    setLabSelecionado(null);
+    setNome(""); setContato("");
+    setModal(true);
+  };
+
+  const abrirEditar = (lab) => {
+    setLabSelecionado(lab);
+    setNome(lab.nome || "");
+    setContato(lab.contato || "");
+    setModal(true);
+  };
+
+  const salvar = async () => {
+    if (!nome.trim()) return;
+    setLoading(true);
+    try {
+      if (!labSelecionado) {
+        await sb("laboratorios", { method: "POST", body: JSON.stringify({ nome: nome.trim(), contato: contato.trim() }) });
+      } else {
+        await sb(`laboratorios?id=eq.${labSelecionado.id}`, { method: "PATCH", prefer: "return=minimal", body: JSON.stringify({ nome: nome.trim(), contato: contato.trim() }) });
+      }
+      setModal(false);
+      onAtualizar();
+    } catch (e) { alert("Erro ao salvar: " + e.message); }
+    setLoading(false);
+  };
+
+  const excluir = async (lab) => {
+    try {
+      await sb(`laboratorios?id=eq.${lab.id}`, { method: "DELETE", prefer: "return=minimal" });
+      setConfirmExcluir(null);
+      onAtualizar();
+    } catch (e) {
+      setConfirmExcluir(null);
+      alert("Não foi possível excluir: o laboratório pode estar associado a produtos ou pedidos.");
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+        <div>
+          <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Laboratórios</h2>
+          <p style={{ margin: 0, color: C.cinzaT, fontSize: 14 }}>{laboratorios.length} laboratórios cadastrados</p>
+        </div>
+        <Btn onClick={abrirNovo} cor={C.azul}>
+          <Icon name="mais" size={16} color={C.branco} /> Novo Laboratório
+        </Btn>
+      </div>
+
+      {laboratorios.length === 0 ? (
+        <Card>
+          <p style={{ color: C.cinzaT, textAlign: "center", margin: 0 }}>Nenhum laboratório cadastrado ainda.</p>
+        </Card>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
+          {laboratorios.map(lab => (
+            <Card key={lab.id} style={{ display: "flex", flexDirection: "column" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                <div style={{ width: 44, height: 44, background: C.azulClaro + "15", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <Icon name="laboratorio" size={20} color={C.azulClaro} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: C.preto, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lab.nome}</div>
+                  {lab.contato && <div style={{ fontSize: 12, color: C.cinzaT, marginTop: 2 }}>📞 {lab.contato}</div>}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: "auto", paddingTop: 12, borderTop: `1px solid ${C.cinzaE}` }}>
+                <BtnIcon icon="lapis" cor={C.laranja} title="Editar laboratório" onClick={() => abrirEditar(lab)} />
+                <BtnIcon icon="lixeira" cor={C.vermelho} title="Excluir laboratório" onClick={() => setConfirmExcluir(lab)} />
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Modal Novo / Editar */}
+      {modal && (
+        <Modal title={labSelecionado ? `Editar — ${labSelecionado.nome}` : "Novo Laboratório"} onClose={() => setModal(false)}>
+          <Input label="Nome do Laboratório" value={nome} onChange={setNome} placeholder="Ex: EMS, Medley, Eurofarma..." required />
+          <Input label="Contato (telefone ou e-mail)" value={contato} onChange={setContato} placeholder="(99) 99999-9999 ou email@lab.com" />
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            <Btn onClick={salvar} disabled={loading || !nome.trim()} cor={C.azul} full>
+              <Icon name="check" size={16} color={C.branco} /> {loading ? "Salvando..." : labSelecionado ? "Salvar Alterações" : "Cadastrar Laboratório"}
+            </Btn>
             <Btn onClick={() => setModal(false)} outline cor={C.cinzaT}>Cancelar</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {/* Confirmar Exclusão */}
+      {confirmExcluir && (
+        <Modal title="Confirmar Exclusão" onClose={() => setConfirmExcluir(null)} width={400}>
+          <p style={{ color: C.cinzaP, fontSize: 14, marginBottom: 8 }}>
+            Deseja excluir o laboratório <strong>{confirmExcluir.nome}</strong>?
+          </p>
+          <p style={{ color: C.cinzaT, fontSize: 13, marginBottom: 24 }}>
+            Esta ação é permanente. Se houver produtos ou pedidos vinculados, a exclusão será bloqueada.
+          </p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Btn onClick={() => excluir(confirmExcluir)} cor={C.vermelho} full>
+              <Icon name="lixeira" size={16} color={C.branco} /> Confirmar Exclusão
+            </Btn>
+            <Btn onClick={() => setConfirmExcluir(null)} outline cor={C.cinzaT}>Cancelar</Btn>
           </div>
         </Modal>
       )}
@@ -719,13 +1126,12 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
       const pedidoId = pedido[0].id;
 
       for (const item of itens) {
-        // Cadastrar produto no catálogo se novo
         let produtoId = null;
         try {
           const prods = await sb(`produtos?nome=ilike.${encodeURIComponent(item.nome)}&limit=1`);
           if (prods.length > 0) {
             produtoId = prods[0].id;
-            await sb(`produtos?id=eq.${produtoId}`, { method: "PATCH", prefer: "", body: JSON.stringify({ total_pedidos: prods[0].total_pedidos + 1 }) });
+            await sb(`produtos?id=eq.${produtoId}`, { method: "PATCH", prefer: "return=minimal", body: JSON.stringify({ total_pedidos: prods[0].total_pedidos + 1 }) });
           } else {
             const novoProd = await sb("produtos", { method: "POST", body: JSON.stringify({ nome: item.nome.toUpperCase(), categoria: item.categoria, laboratorio_id: item.laboratorio_id || null }) });
             produtoId = novoProd[0].id;
@@ -811,8 +1217,11 @@ const MeusPedidos = ({ farmaciaId }) => {
 
   const abrirPedido = async (p) => {
     setPedidoSel(p);
-    const it = await sb(`pedido_itens?pedido_id=eq.${p.id}&order=criado_em.asc`);
-    const co = await sb(`comentarios?pedido_id=eq.${p.id}&order=criado_em.asc`);
+    setItens([]); setComentarios([]);
+    const [it, co] = await Promise.all([
+      sb(`pedido_itens?pedido_id=eq.${p.id}&order=criado_em.asc`),
+      sb(`comentarios?pedido_id=eq.${p.id}&order=criado_em.asc`),
+    ]);
     setItens(it); setComentarios(co);
   };
 
@@ -825,7 +1234,7 @@ const MeusPedidos = ({ farmaciaId }) => {
   };
 
   const confirmarRecebimento = async () => {
-    await sb(`pedidos?id=eq.${pedidoSel.id}`, { method: "PATCH", prefer: "", body: JSON.stringify({ status: "entregue" }) });
+    await sb(`pedidos?id=eq.${pedidoSel.id}`, { method: "PATCH", prefer: "return=minimal", body: JSON.stringify({ status: "entregue" }) });
     setPedidoSel({ ...pedidoSel, status: "entregue" });
     setPedidos(pedidos.map(p => p.id === pedidoSel.id ? { ...p, status: "entregue" } : p));
   };
@@ -867,14 +1276,24 @@ const MeusPedidos = ({ farmaciaId }) => {
             <Badge label={urgenciaLabel[pedidoSel.urgencia]} cor={urgenciaCor[pedidoSel.urgencia]} />
             <Badge label={statusLabel[pedidoSel.status]} cor={statusCor[pedidoSel.status]} />
           </div>
+          <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>ITENS DO PEDIDO</h4>
           <div style={{ background: C.cinzaF, borderRadius: 12, overflow: "hidden", marginBottom: 16 }}>
-            {itens.map((item, i) => (
+            {itens.length === 0 ? (
+              <p style={{ padding: 16, color: C.cinzaT, margin: 0, textAlign: "center" }}>Carregando itens...</p>
+            ) : itens.map((item, i) => (
               <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: i < itens.length - 1 ? `1px solid ${C.cinzaE}` : "none" }}>
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: 14 }}>{item.nome_produto}</div>
-                  <div style={{ fontSize: 12, color: C.cinzaT }}>{item.nome_laboratorio || "Sem laboratório"}</div>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: C.preto }}>{item.nome_produto}</div>
+                  <div style={{ fontSize: 12, color: C.cinzaT, marginTop: 2 }}>
+                    {item.nome_laboratorio ? `🏭 ${item.nome_laboratorio}` : "Sem laboratório"}
+                    {" • "}
+                    {categoriaLabel[item.categoria] || item.categoria}
+                  </div>
                 </div>
-                <span style={{ fontWeight: 700, color: C.azul }}>×{item.quantidade}</span>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <Badge label={categoriaLabel[item.categoria] || item.categoria} cor={categoriaCor[item.categoria] || C.cinzaT} />
+                  <span style={{ fontWeight: 800, fontSize: 18, color: C.azul }}>×{item.quantidade}</span>
+                </div>
               </div>
             ))}
           </div>
@@ -911,7 +1330,7 @@ const MeusPedidos = ({ farmaciaId }) => {
 // =============================================
 // MANUTENÇÃO (farmácia)
 // =============================================
-const ManutencaoFarmacia = ({ farmaciaId, onSalvo }) => {
+const ManutencaoFarmacia = ({ farmaciaId }) => {
   const [tipo, setTipo] = useState("");
   const [descricao, setDescricao] = useState("");
   const [urgencia, setUrgencia] = useState("normal");
@@ -978,7 +1397,6 @@ const ManutencaoFarmacia = ({ farmaciaId, onSalvo }) => {
 // =============================================
 const Previsao = ({ farmaciaId, isDono, farmacias }) => {
   const [dados, setDados] = useState([]);
-  const [filtroFarm, setFiltroFarm] = useState(farmaciaId || "");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -1004,7 +1422,7 @@ const Previsao = ({ farmaciaId, isDono, farmacias }) => {
       setLoading(false);
     };
     carregarPrevisao();
-  }, [farmaciaId, isDono, filtroFarm]);
+  }, [farmaciaId, isDono]);
 
   return (
     <div>
@@ -1052,7 +1470,7 @@ const ManutencoesDono = ({ farmacias }) => {
   }, []);
 
   const atualizarStatus = async (id, status) => {
-    await sb(`manutencoes?id=eq.${id}`, { method: "PATCH", prefer: "", body: JSON.stringify({ status }) });
+    await sb(`manutencoes?id=eq.${id}`, { method: "PATCH", prefer: "return=minimal", body: JSON.stringify({ status }) });
     setManutencoes(manutencoes.map(m => m.id === id ? { ...m, status } : m));
   };
 
@@ -1150,6 +1568,7 @@ export default function App() {
         case "pedidos": return <PedidosDono pedidos={pedidos} farmacias={farmacias} laboratorios={laboratorios} onAtualizar={carregarDados} />;
         case "manutencoes": return <ManutencoesDono farmacias={farmacias} />;
         case "farmacias": return <GerenciarFarmacias farmacias={farmacias} onAtualizar={carregarDados} />;
+        case "laboratorios": return <GerenciarLaboratorios laboratorios={laboratorios} onAtualizar={carregarDados} />;
         case "previsao": return <Previsao isDono={true} farmacias={farmacias} />;
         case "graficos": return (
           <div>
@@ -1172,7 +1591,7 @@ export default function App() {
   };
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: C.cinzaF, fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
+    <div style={{ display: "flex", minHeight: "100vh", background: C.cinzaF, fontFamily: "'Inter', sans-serif" }}>
       <Sidebar ativo={ativo} setAtivo={setAtivo} isDono={usuario.isDono} farmacia={usuario} onSair={() => setUsuario(null)} />
       <main style={{ flex: 1, padding: 32, overflowY: "auto" }}>
         {carregando && !pedidos.length ? <p style={{ color: C.cinzaT }}>Carregando...</p> : renderConteudo()}
