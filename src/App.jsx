@@ -484,6 +484,78 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     } catch (e) { alert("Erro ao excluir pedido: " + e.message); }
   };
 
+  const gerarPDFPedido = () => {
+    if (!pedidoSelecionado || !itensPedido.length) return;
+    const farm = farmacias.find(f => f.id === pedidoSelecionado.farmacia_id);
+    const dataStr = new Date().toLocaleDateString("pt-BR");
+    const horaStr = new Date().toLocaleString("pt-BR");
+
+    const grupos = {};
+    itensPedido.forEach(item => {
+      const key = item.nome_laboratorio || "__sem_lab__";
+      if (!grupos[key]) grupos[key] = [];
+      grupos[key].push(item);
+    });
+
+    const secoes = Object.entries(grupos).map(([lab, items]) => {
+      const labNome = lab === "__sem_lab__" ? "Sem Laboratório" : lab;
+      const linhas = items.map((item, i) => `<tr>
+          <td>${i + 1}</td>
+          <td><strong>${escHtml(item.nome_produto)}</strong></td>
+          <td>${escHtml(categoriaLabel[item.categoria] || item.categoria)}</td>
+          <td style="text-align:center;font-weight:700;color:#1A3A8F">${item.quantidade}</td>
+        </tr>`).join("");
+      return `<div class="lab-section">
+      <div class="lab-header">${escHtml(labNome)}</div>
+      <table><thead><tr><th>#</th><th>Produto</th><th>Categoria</th><th>Qtd</th></tr></thead>
+      <tbody>${linhas}</tbody></table></div>`;
+    }).join("");
+
+    const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Pedido — ${escHtml(farm?.nome || "Farmácia")} — ${dataStr}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; padding: 40px; color: #0F172A; font-size: 13px; }
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 3px solid #1A3A8F; }
+    .header img { width: 180px; height: auto; }
+    .header-right { text-align: right; }
+    .farm-name { font-size: 20px; font-weight: 800; color: #1A3A8F; margin-bottom: 4px; }
+    .date { color: #6B7A99; font-size: 12px; }
+    .lab-section { margin-bottom: 28px; }
+    .lab-header { background: #1A3A8F; color: #FFFFFF; padding: 10px 14px; font-weight: 700; font-size: 13px; border-radius: 6px 6px 0 0; }
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { background: #E8ECF4; }
+    th { padding: 8px 14px; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
+    td { padding: 10px 14px; border-bottom: 1px solid #E8ECF4; }
+    tr:nth-child(even) td { background: #F4F6FA; }
+    .footer { margin-top: 40px; font-size: 10px; color: #6B7A99; text-align: center; border-top: 1px solid #E8ECF4; padding-top: 16px; }
+    @media print { body { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="https://i.postimg.cc/pVwVTC9j/LOGO-VERTICALL-EM-PNG.png" alt="Hiperafarma" onerror="this.style.display='none'">
+    <div class="header-right">
+      <div class="farm-name">${escHtml(farm?.nome || "Farmácia")}</div>
+      <div class="date">Data: ${dataStr}</div>
+      <div class="date">Pedido #${pedidoSelecionado.id.slice(0, 8).toUpperCase()}</div>
+    </div>
+  </div>
+  ${secoes}
+  <div class="footer">Hiperafarma Drogarias — Gerado em ${horaStr} — Documento de uso interno</div>
+  <script>window.onload = function() { window.print(); }</script>
+</body>
+</html>`;
+
+    const w = window.open("", "_blank");
+    if (!w) { alert("Pop-up bloqueado. Permita pop-ups e tente novamente."); return; }
+    w.document.write(html);
+    w.document.close();
+  };
+
   const gerarPDFLab = async () => {
     if (!labPDF) return;
     const lab = laboratorios.find(l => l.id === labPDF);
@@ -669,10 +741,15 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
       {/* Modal Pedido */}
       {pedidoSelecionado && (
         <Modal title={`Pedido — ${farmacias.find(f => f.id === pedidoSelecionado.farmacia_id)?.nome}`} onClose={() => setPedidoSelecionado(null)} width={680}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 20, alignItems: "center", flexWrap: "wrap" }}>
             <Badge label={urgenciaLabel[pedidoSelecionado.urgencia]} cor={urgenciaCor[pedidoSelecionado.urgencia]} />
             <Badge label={statusLabel[pedidoSelecionado.status]} cor={statusCor[pedidoSelecionado.status]} />
-            <span style={{ fontSize: 12, color: C.cinzaT, marginLeft: "auto" }}>{new Date(pedidoSelecionado.criado_em).toLocaleString("pt-BR")}</span>
+            <span style={{ fontSize: 12, color: C.cinzaT }}>{new Date(pedidoSelecionado.criado_em).toLocaleString("pt-BR")}</span>
+            <div style={{ marginLeft: "auto" }}>
+              <Btn onClick={gerarPDFPedido} cor={C.azulClaro} small disabled={loadingItens || !itensPedido.length}>
+                <Icon name="pdf" size={14} color={C.branco} /> PDF do Pedido
+              </Btn>
+            </div>
           </div>
 
           {pedidoSelecionado.observacao && (
@@ -1242,6 +1319,7 @@ const MeusPedidos = ({ farmaciaId }) => {
   const [comentarios, setComentarios] = useState([]);
   const [novoComentario, setNovoComentario] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingItens, setLoadingItens] = useState(false);
 
   useEffect(() => {
     sb(`pedidos?farmacia_id=eq.${farmaciaId}&order=criado_em.desc`).then(d => { setPedidos(d); setLoading(false); });
@@ -1250,11 +1328,13 @@ const MeusPedidos = ({ farmaciaId }) => {
   const abrirPedido = async (p) => {
     setPedidoSel(p);
     setItens([]); setComentarios([]);
+    setLoadingItens(true);
     const [it, co] = await Promise.all([
       sb(`pedido_itens?pedido_id=eq.${p.id}&order=criado_em.asc`),
       sb(`comentarios?pedido_id=eq.${p.id}&order=criado_em.asc`),
     ]);
     setItens(it); setComentarios(co);
+    setLoadingItens(false);
   };
 
   const enviarComentario = async () => {
@@ -1292,9 +1372,10 @@ const MeusPedidos = ({ farmaciaId }) => {
                     <div style={{ fontSize: 12, color: C.cinzaT }}>{new Date(p.criado_em).toLocaleString("pt-BR")}</div>
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
                   <Badge label={statusLabel[p.status]} cor={statusCor[p.status]} />
+                  <BtnIcon icon="olho" cor={C.azulClaro} title="Ver pedido" onClick={e => { e.stopPropagation(); abrirPedido(p); }} />
                 </div>
               </div>
             </Card>
@@ -1310,8 +1391,10 @@ const MeusPedidos = ({ farmaciaId }) => {
           </div>
           <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>ITENS DO PEDIDO</h4>
           <div style={{ background: C.cinzaF, borderRadius: 12, overflow: "hidden", marginBottom: 16 }}>
-            {itens.length === 0 ? (
+            {loadingItens ? (
               <p style={{ padding: 16, color: C.cinzaT, margin: 0, textAlign: "center" }}>Carregando itens...</p>
+            ) : itens.length === 0 ? (
+              <p style={{ padding: 16, color: C.cinzaT, margin: 0, textAlign: "center" }}>Nenhum item encontrado.</p>
             ) : itens.map((item, i) => (
               <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: i < itens.length - 1 ? `1px solid ${C.cinzaE}` : "none" }}>
                 <div>
@@ -1336,7 +1419,7 @@ const MeusPedidos = ({ farmaciaId }) => {
             </div>
           )}
 
-          <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>COMENTÁRIOS DO DONO</h4>
+          <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>COMENTÁRIOS</h4>
           <div style={{ background: C.cinzaF, borderRadius: 12, padding: 12, marginBottom: 12, maxHeight: 180, overflowY: "auto" }}>
             {comentarios.length === 0 ? <p style={{ color: C.cinzaT, fontSize: 13, margin: 0 }}>Nenhum comentário.</p> :
               comentarios.map(c => (
@@ -1551,11 +1634,45 @@ const ManutencoesDono = ({ farmacias }) => {
 export default function App() {
   const [usuario, setUsuario] = useState(null);
   const [ativo, setAtivo] = useState("dashboard");
+  const [verificando, setVerificando] = useState(true);
   const [pedidos, setPedidos] = useState([]);
   const [farmacias, setFarmacias] = useState([]);
   const [laboratorios, setLaboratorios] = useState([]);
   const [manutencoes, setManutencoes] = useState([]);
   const [carregando, setCarregando] = useState(false);
+
+  useEffect(() => {
+    const verificarSessao = async () => {
+      try {
+        const salvo = localStorage.getItem("hiperafarma_usuario");
+        if (salvo) {
+          const u = JSON.parse(salvo);
+          const dados = await sb(`farmacias?id=eq.${u.id}&ativa=eq.true`);
+          if (dados.length > 0) {
+            setUsuario(u);
+            setAtivo(u.isDono ? "dashboard" : "meus-pedidos");
+          } else {
+            localStorage.removeItem("hiperafarma_usuario");
+          }
+        }
+      } catch {
+        localStorage.removeItem("hiperafarma_usuario");
+      }
+      setVerificando(false);
+    };
+    verificarSessao();
+  }, []);
+
+  const fazerLogin = (u) => {
+    localStorage.setItem("hiperafarma_usuario", JSON.stringify(u));
+    setUsuario(u);
+    setAtivo(u.isDono ? "dashboard" : "meus-pedidos");
+  };
+
+  const fazerLogout = () => {
+    localStorage.removeItem("hiperafarma_usuario");
+    setUsuario(null);
+  };
 
   const carregarDados = useCallback(async () => {
     if (!usuario) return;
@@ -1583,7 +1700,12 @@ export default function App() {
     return () => clearInterval(interval);
   }, [usuario, carregarDados]);
 
-  if (!usuario) return <Login onLogin={(u) => { setUsuario(u); setAtivo(u.isDono ? "dashboard" : "meus-pedidos"); }} />;
+  if (verificando) return (
+    <div style={{ minHeight: "100vh", background: `linear-gradient(135deg, ${C.azul} 0%, ${C.azulClaro} 100%)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ color: C.branco, fontSize: 16, fontWeight: 600 }}>Carregando...</div>
+    </div>
+  );
+  if (!usuario) return <Login onLogin={fazerLogin} />;
 
   const stats = {
     pendentes: pedidos.filter(p => p.status === "pendente").length,
@@ -1624,7 +1746,7 @@ export default function App() {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: C.cinzaF, fontFamily: "'Inter', sans-serif" }}>
-      <Sidebar ativo={ativo} setAtivo={setAtivo} isDono={usuario.isDono} farmacia={usuario} onSair={() => setUsuario(null)} />
+      <Sidebar ativo={ativo} setAtivo={setAtivo} isDono={usuario.isDono} farmacia={usuario} onSair={fazerLogout} />
       <main style={{ flex: 1, padding: 32, overflowY: "auto" }}>
         {carregando && !pedidos.length ? <p style={{ color: C.cinzaT }}>Carregando...</p> : renderConteudo()}
       </main>
