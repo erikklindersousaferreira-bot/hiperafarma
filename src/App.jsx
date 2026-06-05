@@ -289,11 +289,11 @@ const Sidebar = ({ ativo, setAtivo, isDono, farmacia, onSair }) => {
     <div style={{ width: 240, minHeight: "100vh", background: C.azul, display: "flex", flexDirection: "column", flexShrink: 0 }}>
       {/* Logo */}
       <div style={{ padding: "24px 20px 20px", borderBottom: `1px solid rgba(255,255,255,0.1)` }}>
-        <div style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
           <img
             src="https://i.postimg.cc/J7f7nxyB/LOGO-HORIZONTAL-EM-PNG.png"
             alt="Hiperafarma"
-            style={{ width: "100%", maxWidth: 160, height: "auto", display: "block" }}
+            style={{ width: 140, height: "auto" }}
           />
         </div>
         <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}>
@@ -432,7 +432,10 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   const [novoComentario, setNovoComentario] = useState("");
   const [geraPDF, setGeraPDF] = useState(false);
   const [labPDF, setLabPDF] = useState("");
+  const [farmPDF, setFarmPDF] = useState("");
   const [loadingPDF, setLoadingPDF] = useState(false);
+  const [loadingItens, setLoadingItens] = useState(false);
+  const [confirmExcluirPedido, setConfirmExcluirPedido] = useState(false);
 
   const pedidosFiltrados = pedidos.filter(p => {
     if (filtroFarmacia && p.farmacia_id !== filtroFarmacia) return false;
@@ -445,12 +448,14 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     setPedidoSelecionado(pedido);
     setItensPedido([]);
     setComentarios([]);
+    setLoadingItens(true);
     const [itens, comts] = await Promise.all([
       sb(`pedido_itens?pedido_id=eq.${pedido.id}&order=criado_em.asc`),
       sb(`comentarios?pedido_id=eq.${pedido.id}&order=criado_em.asc`),
     ]);
     setItensPedido(itens);
     setComentarios(comts);
+    setLoadingItens(false);
   };
 
   const enviarComentario = async () => {
@@ -468,13 +473,25 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     setPedidoSelecionado({ ...pedidoSelecionado, status: novoStatus });
   };
 
+  const excluirPedido = async () => {
+    const id = pedidoSelecionado.id;
+    try {
+      await sb(`pedido_itens?pedido_id=eq.${id}`, { method: "DELETE", prefer: "return=minimal" });
+      await sb(`pedidos?id=eq.${id}`, { method: "DELETE", prefer: "return=minimal" });
+      setConfirmExcluirPedido(false);
+      setPedidoSelecionado(null);
+      onAtualizar();
+    } catch (e) { alert("Erro ao excluir pedido: " + e.message); }
+  };
+
   const gerarPDFLab = async () => {
     if (!labPDF) return;
     const lab = laboratorios.find(l => l.id === labPDF);
+    const farmSel = farmPDF ? farmacias.find(f => f.id === farmPDF) : null;
     setLoadingPDF(true);
     try {
       const pendingIds = pedidos
-        .filter(p => p.status === "pendente" || p.status === "em_andamento")
+        .filter(p => (p.status === "pendente" || p.status === "em_andamento") && (!farmPDF || p.farmacia_id === farmPDF))
         .map(p => p.id);
 
       if (!pendingIds.length) {
@@ -511,12 +528,12 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>Pedido ${escHtml(lab?.nome)} — ${dataStr}</title>
+  <title>${escHtml(farmSel ? `Pedido ${lab?.nome} — Farmácia ${farmSel.nome}` : `Pedido ${lab?.nome} — Todas as Farmácias`)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, Helvetica, sans-serif; padding: 40px; color: #0F172A; font-size: 13px; }
     .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 3px solid #1A3A8F; }
-    .header img { height: 55px; }
+    .header img { width: 180px; height: auto; }
     .header-right { text-align: right; }
     .lab-name { font-size: 20px; font-weight: 800; color: #1A3A8F; margin-bottom: 4px; }
     .date { color: #6B7A99; font-size: 12px; }
@@ -535,7 +552,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   <div class="header">
     <img src="https://i.postimg.cc/J7f7nxyB/LOGO-HORIZONTAL-EM-PNG.png" alt="Hiperafarma" onerror="this.style.display='none'">
     <div class="header-right">
-      <div class="lab-name">${escHtml(lab?.nome || "Laboratório")}</div>
+      <div class="lab-name">${escHtml(farmSel ? `Pedido ${lab?.nome || "Laboratório"} — Farmácia ${farmSel.nome}` : `Pedido ${lab?.nome || "Laboratório"} — Todas as Farmácias`)}</div>
       <div class="date">Data: ${dataStr}</div>
       <div class="date">Itens pendentes e em andamento</div>
     </div>
@@ -666,8 +683,10 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
 
           <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>ITENS DO PEDIDO</h4>
           <div style={{ background: C.cinzaF, borderRadius: 12, overflow: "hidden", marginBottom: 20 }}>
-            {itensPedido.length === 0 ? (
+            {loadingItens ? (
               <p style={{ padding: 16, color: C.cinzaT, margin: 0, textAlign: "center" }}>Carregando itens...</p>
+            ) : itensPedido.length === 0 ? (
+              <p style={{ padding: 16, color: C.cinzaT, margin: 0, textAlign: "center" }}>Nenhum item encontrado.</p>
             ) : itensPedido.map((item, i) => (
               <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: i < itensPedido.length - 1 ? `1px solid ${C.cinzaE}` : "none" }}>
                 <div>
@@ -688,12 +707,15 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
           </div>
 
           <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>ATUALIZAR STATUS</h4>
-          <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
-            {["pendente", "em_andamento", "entregue"].map(s => (
-              <Btn key={s} onClick={() => atualizarStatus(s)} cor={statusCor[s]} small outline={pedidoSelecionado.status !== s}>
-                {statusLabel[s]}
-              </Btn>
-            ))}
+          <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {["pendente", "em_andamento", "entregue"].map(s => (
+                <Btn key={s} onClick={() => atualizarStatus(s)} cor={statusCor[s]} small outline={pedidoSelecionado.status !== s}>
+                  {statusLabel[s]}
+                </Btn>
+              ))}
+            </div>
+            <BtnIcon icon="lixeira" cor={C.vermelho} title="Excluir pedido" onClick={() => setConfirmExcluirPedido(true)} />
           </div>
 
           <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>COMENTÁRIOS</h4>
@@ -718,16 +740,41 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
 
       {/* Modal PDF */}
       {geraPDF && (
-        <Modal title="Gerar PDF por Laboratório" onClose={() => setGeraPDF(false)} width={440}>
+        <Modal title="Gerar PDF por Laboratório" onClose={() => { setGeraPDF(false); setFarmPDF(""); }} width={440}>
           <p style={{ color: C.cinzaT, fontSize: 14, marginBottom: 20 }}>
-            Selecione o laboratório para gerar o PDF com todos os itens pendentes e em andamento.
+            Selecione o laboratório e, opcionalmente, a farmácia para filtrar o PDF.
           </p>
           <Select label="Laboratório" value={labPDF} onChange={setLabPDF} options={laboratorios.map(l => ({ value: l.id, label: l.nome }))} />
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Farmácia (opcional)</label>
+            <select value={farmPDF} onChange={e => setFarmPDF(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}>
+              <option value="">Todas as farmácias</option>
+              {farmacias.filter(f => f.usuario !== "admin").map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
+            </select>
+          </div>
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
             <Btn onClick={gerarPDFLab} cor={C.vermelho} disabled={!labPDF || loadingPDF} full>
               <Icon name="pdf" size={16} color={C.branco} /> {loadingPDF ? "Gerando..." : "Gerar e Imprimir PDF"}
             </Btn>
-            <Btn onClick={() => setGeraPDF(false)} outline cor={C.cinzaT}>Cancelar</Btn>
+            <Btn onClick={() => { setGeraPDF(false); setFarmPDF(""); }} outline cor={C.cinzaT}>Cancelar</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal Confirmar Exclusão de Pedido */}
+      {confirmExcluirPedido && (
+        <Modal title="Confirmar Exclusão" onClose={() => setConfirmExcluirPedido(false)} width={400}>
+          <p style={{ color: C.cinzaP, fontSize: 14, marginBottom: 8 }}>
+            Deseja excluir este pedido permanentemente?
+          </p>
+          <p style={{ color: C.cinzaT, fontSize: 13, marginBottom: 24 }}>
+            Todos os itens do pedido também serão removidos. Esta ação não pode ser desfeita.
+          </p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Btn onClick={excluirPedido} cor={C.vermelho} full>
+              <Icon name="lixeira" size={16} color={C.branco} /> Confirmar Exclusão
+            </Btn>
+            <Btn onClick={() => setConfirmExcluirPedido(false)} outline cor={C.cinzaT}>Cancelar</Btn>
           </div>
         </Modal>
       )}
@@ -817,7 +864,7 @@ const GerenciarFarmacias = ({ farmacias, onAtualizar }) => {
     } catch (e) { alert("Erro ao excluir: " + e.message); }
   };
 
-  const listaFarmacias = farmacias.filter(f => f.usuario !== "admin");
+  const listaFarmacias = farmacias.filter(f => f.usuario !== "admin" && f.ativa !== false);
 
   return (
     <div>
