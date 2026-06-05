@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
 // =============================================
 // CONFIGURAÇÃO SUPABASE
@@ -55,6 +55,9 @@ const categoriaCor = { generico: C.azulClaro, etico: "#7C3AED", equipamento: C.l
 
 const escHtml = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+const MobileCtx = createContext(false);
+const useMobile = () => useContext(MobileCtx);
+
 // =============================================
 // ÍCONES SVG
 // =============================================
@@ -83,6 +86,7 @@ const Icon = ({ name, size = 20, color = "currentColor" }) => {
     lapis: <><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></>,
     lixeira: <><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></>,
     laboratorio: <><line x1="9" y1="3" x2="15" y2="3"/><polyline points="9,3 5,20 19,20 15,3"/><line x1="7" y1="13" x2="17" y2="13"/></>,
+    hamburger: <><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -186,17 +190,20 @@ const Select = ({ label, value, onChange, options, required = false }) => (
   </div>
 );
 
-const Modal = ({ title, onClose, children, width = 560 }) => (
-  <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-    <div style={{ background: C.branco, borderRadius: 20, width: "100%", maxWidth: width, maxHeight: "90vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px", borderBottom: `1px solid ${C.cinzaE}`, position: "sticky", top: 0, background: C.branco, zIndex: 1 }}>
-        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.azul }}>{title}</h3>
-        <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.cinzaT, padding: 4 }}><Icon name="fechar" size={20} /></button>
+const Modal = ({ title, onClose, children, width = 560 }) => {
+  const isMobile = useMobile();
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", zIndex: 1000, display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", padding: isMobile ? 0 : 16 }}>
+      <div style={{ background: C.branco, borderRadius: isMobile ? "20px 20px 0 0" : 20, width: "100%", maxWidth: isMobile ? "100%" : width, maxHeight: isMobile ? "92vh" : "90vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px", borderBottom: `1px solid ${C.cinzaE}`, position: "sticky", top: 0, background: C.branco, zIndex: 1 }}>
+          <h3 style={{ margin: 0, fontSize: isMobile ? 16 : 18, fontWeight: 700, color: C.azul }}>{title}</h3>
+          <button onClick={onClose} style={{ background: C.cinzaF, border: "none", cursor: "pointer", color: C.cinzaT, padding: 8, borderRadius: 8, display: "flex" }}><Icon name="fechar" size={20} /></button>
+        </div>
+        <div style={{ padding: isMobile ? 16 : 24 }}>{children}</div>
       </div>
-      <div style={{ padding: 24 }}>{children}</div>
     </div>
-  </div>
-);
+  );
+};
 
 // =============================================
 // TELA DE LOGIN
@@ -267,7 +274,8 @@ const Login = ({ onLogin }) => {
 // =============================================
 // SIDEBAR
 // =============================================
-const Sidebar = ({ ativo, setAtivo, isDono, farmacia, onSair }) => {
+const Sidebar = ({ ativo, setAtivo, isDono, farmacia, onSair, isOpen, onClose }) => {
+  const isMobile = useMobile();
   const menuDono = [
     { id: "dashboard", label: "Painel Central", icon: "home" },
     { id: "pedidos", label: "Pedidos", icon: "pedidos" },
@@ -284,56 +292,114 @@ const Sidebar = ({ ativo, setAtivo, isDono, farmacia, onSair }) => {
     { id: "previsao-farm", label: "Previsão", icon: "previsao" },
   ];
   const menu = isDono ? menuDono : menuFarmacia;
+  const handleNav = (id) => { setAtivo(id); if (isMobile && onClose) onClose(); };
+
+  if (isMobile && !isOpen) return null;
 
   return (
-    <div style={{ width: 240, minHeight: "100vh", background: C.azul, display: "flex", flexDirection: "column", flexShrink: 0 }}>
-      {/* Logo */}
-      <div style={{ padding: "24px 20px 20px", borderBottom: `1px solid rgba(255,255,255,0.1)` }}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
-          <img
-            src="https://i.postimg.cc/pVwVTC9j/LOGO-VERTICALL-EM-PNG.png"
-            alt="Hiperafarma"
-            style={{ width: 120, height: "auto" }}
-          />
+    <>
+      {isMobile && <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 900 }} />}
+      <div style={{
+        width: 240, background: C.azul, display: "flex", flexDirection: "column", flexShrink: 0,
+        ...(isMobile ? { position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 1000, overflowY: "auto" } : { minHeight: "100vh" }),
+      }}>
+        <div style={{ padding: "24px 20px 20px", borderBottom: `1px solid rgba(255,255,255,0.1)`, position: "relative" }}>
+          {isMobile && (
+            <button onClick={onClose} style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", cursor: "pointer" }}>
+              <Icon name="fechar" size={20} color="rgba(255,255,255,0.7)" />
+            </button>
+          )}
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+            <img src="https://i.postimg.cc/pVwVTC9j/LOGO-VERTICALL-EM-PNG.png" alt="Hiperafarma" style={{ width: 120, height: "auto" }} />
+          </div>
+          <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 10, marginBottom: 2 }}>{isDono ? "ADMINISTRADOR" : "FARMÁCIA"}</div>
+            <div style={{ color: C.branco, fontWeight: 700, fontSize: 13 }}>{farmacia.nome}</div>
+          </div>
         </div>
-        <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}>
-          <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 10, marginBottom: 2 }}>{isDono ? "ADMINISTRADOR" : "FARMÁCIA"}</div>
-          <div style={{ color: C.branco, fontWeight: 700, fontSize: 13 }}>{farmacia.nome}</div>
-        </div>
-      </div>
-
-      {/* Menu */}
-      <nav style={{ flex: 1, padding: "16px 12px" }}>
-        {menu.map(item => (
-          <button key={item.id} onClick={() => setAtivo(item.id)} style={{
+        <nav style={{ flex: 1, padding: "16px 12px" }}>
+          {menu.map(item => (
+            <button key={item.id} onClick={() => handleNav(item.id)} style={{
+              width: "100%", display: "flex", alignItems: "center", gap: 10,
+              padding: "11px 14px", borderRadius: 12, border: "none", cursor: "pointer",
+              background: ativo === item.id ? C.amarelo : "transparent",
+              color: ativo === item.id ? C.azul : "rgba(255,255,255,0.7)",
+              fontWeight: ativo === item.id ? 700 : 500, fontSize: 14,
+              marginBottom: 4, textAlign: "left", transition: "all 0.15s", fontFamily: "inherit",
+            }}>
+              <Icon name={item.icon} size={18} color={ativo === item.id ? C.azul : "rgba(255,255,255,0.7)"} />
+              {item.label}
+            </button>
+          ))}
+        </nav>
+        <div style={{ padding: "16px 12px", borderTop: `1px solid rgba(255,255,255,0.1)` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0 12px" }}>
+            <div style={{ width: 8, height: 8, background: C.verdeClaro, borderRadius: "50%" }} />
+            <span style={{ color: "rgba(255,255,255,0.5)", fontSize: 11 }}>Sistema Online</span>
+          </div>
+          <button onClick={onSair} style={{
             width: "100%", display: "flex", alignItems: "center", gap: 10,
             padding: "11px 14px", borderRadius: 12, border: "none", cursor: "pointer",
-            background: ativo === item.id ? C.amarelo : "transparent",
-            color: ativo === item.id ? C.azul : "rgba(255,255,255,0.7)",
-            fontWeight: ativo === item.id ? 700 : 500, fontSize: 14,
-            marginBottom: 4, textAlign: "left", transition: "all 0.15s", fontFamily: "inherit",
+            background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.7)",
+            fontWeight: 500, fontSize: 14, fontFamily: "inherit",
           }}>
-            <Icon name={item.icon} size={18} color={ativo === item.id ? C.azul : "rgba(255,255,255,0.7)"} />
-            {item.label}
+            <Icon name="sair" size={18} color="rgba(255,255,255,0.7)" /> Sair
           </button>
-        ))}
-      </nav>
-
-      {/* Sair */}
-      <div style={{ padding: "16px 12px", borderTop: `1px solid rgba(255,255,255,0.1)` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0 12px" }}>
-          <div style={{ width: 8, height: 8, background: C.verdeClaro, borderRadius: "50%" }} />
-          <span style={{ color: "rgba(255,255,255,0.5)", fontSize: 11 }}>Sistema Online</span>
         </div>
-        <button onClick={onSair} style={{
-          width: "100%", display: "flex", alignItems: "center", gap: 10,
-          padding: "11px 14px", borderRadius: 12, border: "none", cursor: "pointer",
-          background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.7)",
-          fontWeight: 500, fontSize: 14, fontFamily: "inherit",
-        }}>
-          <Icon name="sair" size={18} color="rgba(255,255,255,0.7)" /> Sair
-        </button>
       </div>
+    </>
+  );
+};
+
+// =============================================
+// TOPBAR + BOTTOM NAV (mobile)
+// =============================================
+const TopBar = ({ onMenuOpen }) => (
+  <div style={{
+    position: "fixed", top: 0, left: 0, right: 0, height: 56, zIndex: 800,
+    background: C.azul, display: "flex", alignItems: "center",
+    justifyContent: "space-between", padding: "0 8px 0 4px",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+  }}>
+    <button onClick={onMenuOpen} style={{ background: "none", border: "none", cursor: "pointer", padding: 12, display: "flex", alignItems: "center" }}>
+      <Icon name="hamburger" size={24} color={C.branco} />
+    </button>
+    <img src="https://i.postimg.cc/pVwVTC9j/LOGO-VERTICALL-EM-PNG.png" alt="Hiperafarma" style={{ height: 38, width: "auto" }} />
+    <div style={{ width: 48 }} />
+  </div>
+);
+
+const BottomNav = ({ ativo, setAtivo, isDono }) => {
+  const menuDono = [
+    { id: "dashboard", label: "Painel", icon: "home" },
+    { id: "pedidos", label: "Pedidos", icon: "pedidos" },
+    { id: "farmacias", label: "Farmácias", icon: "farmacias" },
+    { id: "graficos", label: "Relatórios", icon: "grafico" },
+  ];
+  const menuFarm = [
+    { id: "meus-pedidos", label: "Pedidos", icon: "pedidos" },
+    { id: "nova-solicitacao", label: "Novo", icon: "mais" },
+    { id: "manutencao-farm", label: "Manutenção", icon: "manutencao" },
+    { id: "previsao-farm", label: "Previsão", icon: "previsao" },
+  ];
+  const menu = isDono ? menuDono : menuFarm;
+  return (
+    <div style={{
+      position: "fixed", bottom: 0, left: 0, right: 0, height: 60, zIndex: 800,
+      background: C.branco, borderTop: `1px solid ${C.cinzaE}`,
+      display: "flex", alignItems: "stretch",
+    }}>
+      {menu.map(item => (
+        <button key={item.id} onClick={() => setAtivo(item.id)} style={{
+          flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2,
+          background: "none", border: "none", cursor: "pointer",
+          color: ativo === item.id ? C.azul : C.cinzaT, fontFamily: "inherit",
+          borderTop: ativo === item.id ? `2px solid ${C.azul}` : "2px solid transparent",
+        }}>
+          <Icon name={item.icon} size={22} color={ativo === item.id ? C.azul : C.cinzaT} />
+          <span style={{ fontSize: 10, fontWeight: ativo === item.id ? 700 : 400 }}>{item.label}</span>
+        </button>
+      ))}
     </div>
   );
 };
@@ -342,6 +408,7 @@ const Sidebar = ({ ativo, setAtivo, isDono, farmacia, onSair }) => {
 // DASHBOARD DO DONO
 // =============================================
 const Dashboard = ({ stats, pedidos, manutencoes, farmacias }) => {
+  const isMobile = useMobile();
   const cards = [
     { label: "Pedidos Pendentes", valor: stats.pendentes, cor: C.amarelo, icon: "pedidos" },
     { label: "Pedidos Urgentes/Críticos", valor: stats.urgentes, cor: C.vermelho, icon: "alerta" },
@@ -357,7 +424,7 @@ const Dashboard = ({ stats, pedidos, manutencoes, farmacias }) => {
       <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Painel Central</h2>
       <p style={{ margin: "0 0 28px", color: C.cinzaT, fontSize: 14 }}>Visão geral da rede Hiperafarma</p>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16, marginBottom: 28 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(180px, 1fr))", gap: isMobile ? 10 : 16, marginBottom: 28 }}>
         {cards.map(c => (
           <Card key={c.label} style={{ borderTop: `4px solid ${c.cor}`, padding: 20 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -371,7 +438,7 @@ const Dashboard = ({ stats, pedidos, manutencoes, farmacias }) => {
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20 }}>
         <Card>
           <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700, color: C.preto, display: "flex", alignItems: "center", gap: 8 }}>
             <Icon name="pedidos" size={18} color={C.azul} /> Últimos Pedidos
@@ -683,7 +750,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
             <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>FARMÁCIA</label>
             <select value={filtroFarmacia} onChange={e => setFiltroFarmacia(e.target.value)} style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 13, fontFamily: "inherit", background: C.branco }}>
               <option value="">Todas</option>
-              {farmacias.filter(f => f.usuario !== "admin").map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
+              {farmacias.filter(f => f.usuario !== "admin" && f.ativa !== false).map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
             </select>
           </div>
           <div style={{ flex: 1, minWidth: 140 }}>
@@ -828,7 +895,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
             <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Farmácia (opcional)</label>
             <select value={farmPDF} onChange={e => setFarmPDF(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}>
               <option value="">Todas as farmácias</option>
-              {farmacias.filter(f => f.usuario !== "admin").map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
+              {farmacias.filter(f => f.usuario !== "admin" && f.ativa !== false).map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
             </select>
           </div>
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
@@ -1640,6 +1707,14 @@ export default function App() {
   const [laboratorios, setLaboratorios] = useState([]);
   const [manutencoes, setManutencoes] = useState([]);
   const [carregando, setCarregando] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     const verificarSessao = async () => {
@@ -1745,11 +1820,26 @@ export default function App() {
   };
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: C.cinzaF, fontFamily: "'Inter', sans-serif" }}>
-      <Sidebar ativo={ativo} setAtivo={setAtivo} isDono={usuario.isDono} farmacia={usuario} onSair={fazerLogout} />
-      <main style={{ flex: 1, padding: 32, overflowY: "auto" }}>
-        {carregando && !pedidos.length ? <p style={{ color: C.cinzaT }}>Carregando...</p> : renderConteudo()}
-      </main>
-    </div>
+    <MobileCtx.Provider value={isMobile}>
+      <div style={{ display: "flex", minHeight: "100vh", background: C.cinzaF, fontFamily: "'Inter', sans-serif" }}>
+        {isMobile && <TopBar onMenuOpen={() => setSidebarOpen(true)} />}
+        <Sidebar
+          ativo={ativo} setAtivo={setAtivo} isDono={usuario.isDono}
+          farmacia={usuario} onSair={fazerLogout}
+          isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)}
+        />
+        <main style={{
+          flex: 1,
+          padding: isMobile ? "16px 12px" : 32,
+          overflowY: "auto",
+          marginTop: isMobile ? 56 : 0,
+          paddingBottom: isMobile ? 76 : 32,
+          minWidth: 0,
+        }}>
+          {carregando && !pedidos.length ? <p style={{ color: C.cinzaT }}>Carregando...</p> : renderConteudo()}
+        </main>
+        {isMobile && <BottomNav ativo={ativo} setAtivo={setAtivo} isDono={usuario.isDono} />}
+      </div>
+    </MobileCtx.Provider>
   );
 }
