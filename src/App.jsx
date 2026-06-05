@@ -364,7 +364,7 @@ const TopBar = ({ onMenuOpen }) => (
     <button onClick={onMenuOpen} style={{ background: "none", border: "none", cursor: "pointer", padding: 12, display: "flex", alignItems: "center" }}>
       <Icon name="hamburger" size={24} color={C.branco} />
     </button>
-    <img src="https://i.postimg.cc/pVwVTC9j/LOGO-VERTICALL-EM-PNG.png" alt="Hiperafarma" style={{ height: 38, width: "auto" }} />
+    <img src="https://i.postimg.cc/pVwVTC9j/LOGO-VERTICALL-EM-PNG.png" alt="Hiperafarma" style={{ height: 40, width: "auto" }} />
     <div style={{ width: 48 }} />
   </div>
 );
@@ -409,13 +409,20 @@ const BottomNav = ({ ativo, setAtivo, isDono }) => {
 // =============================================
 const Dashboard = ({ stats, pedidos, manutencoes, farmacias }) => {
   const isMobile = useMobile();
-  const cards = [
+  const cardsDesktop = [
     { label: "Pedidos Pendentes", valor: stats.pendentes, cor: C.amarelo, icon: "pedidos" },
     { label: "Pedidos Urgentes/Críticos", valor: stats.urgentes, cor: C.vermelho, icon: "alerta" },
     { label: "Manutenções Abertas", valor: stats.manutencoes, cor: C.laranja, icon: "manutencao" },
     { label: "Farmácias Ativas", valor: stats.farmacias, cor: C.verde, icon: "farmacias" },
     { label: "Pedidos Hoje", valor: stats.hoje, cor: C.azulClaro, icon: "home" },
   ];
+  const cardsMobile = [
+    { label: "Pedidos Pendentes", valor: stats.pendentes, cor: C.amarelo, icon: "pedidos" },
+    { label: "Urgentes/Críticos", valor: stats.urgentes, cor: C.vermelho, icon: "alerta" },
+    { label: "Manutenções", valor: stats.manutencoes, cor: C.laranja, icon: "manutencao" },
+    { label: "Pedidos Hoje", valor: stats.hoje, cor: C.azulClaro, icon: "home" },
+  ];
+  const cards = isMobile ? cardsMobile : cardsDesktop;
 
   const recentesPedidos = pedidos.slice(0, 5);
 
