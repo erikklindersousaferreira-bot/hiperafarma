@@ -291,9 +291,9 @@ const Sidebar = ({ ativo, setAtivo, isDono, farmacia, onSair }) => {
       <div style={{ padding: "24px 20px 20px", borderBottom: `1px solid rgba(255,255,255,0.1)` }}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
           <img
-            src="https://i.postimg.cc/J7f7nxyB/LOGO-HORIZONTAL-EM-PNG.png"
+            src="https://i.postimg.cc/pVwVTC9j/LOGO-VERTICALL-EM-PNG.png"
             alt="Hiperafarma"
-            style={{ width: 140, height: "auto" }}
+            style={{ width: 120, height: "auto" }}
           />
         </div>
         <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}>
@@ -474,11 +474,11 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   };
 
   const excluirPedido = async () => {
+    if (!window.confirm("Deseja excluir este pedido permanentemente? Todos os itens serão removidos e esta ação não pode ser desfeita.")) return;
     const id = pedidoSelecionado.id;
     try {
       await sb(`pedido_itens?pedido_id=eq.${id}`, { method: "DELETE", prefer: "return=minimal" });
       await sb(`pedidos?id=eq.${id}`, { method: "DELETE", prefer: "return=minimal" });
-      setConfirmExcluirPedido(false);
       setPedidoSelecionado(null);
       onAtualizar();
     } catch (e) { alert("Erro ao excluir pedido: " + e.message); }
@@ -550,7 +550,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
 </head>
 <body>
   <div class="header">
-    <img src="https://i.postimg.cc/J7f7nxyB/LOGO-HORIZONTAL-EM-PNG.png" alt="Hiperafarma" onerror="this.style.display='none'">
+    <img src="https://i.postimg.cc/pVwVTC9j/LOGO-VERTICALL-EM-PNG.png" alt="Hiperafarma" onerror="this.style.display='none'">
     <div class="header-right">
       <div class="lab-name">${escHtml(farmSel ? `Pedido ${lab?.nome || "Laboratório"} — Farmácia ${farmSel.nome}` : `Pedido ${lab?.nome || "Laboratório"} — Todas as Farmácias`)}</div>
       <div class="date">Data: ${dataStr}</div>
@@ -658,7 +658,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
                   <Badge label={statusLabel[p.status]} cor={statusCor[p.status]} />
-                  <Icon name="olho" size={18} color={C.cinzaT} />
+                  <BtnIcon icon="olho" cor={C.azulClaro} title="Visualizar pedido" onClick={e => { e.stopPropagation(); abrirPedido(p); }} />
                 </div>
               </div>
             </Card>
@@ -707,15 +707,17 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
           </div>
 
           <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>ATUALIZAR STATUS</h4>
-          <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {["pendente", "em_andamento", "entregue"].map(s => (
-                <Btn key={s} onClick={() => atualizarStatus(s)} cor={statusCor[s]} small outline={pedidoSelecionado.status !== s}>
-                  {statusLabel[s]}
-                </Btn>
-              ))}
-            </div>
-            <BtnIcon icon="lixeira" cor={C.vermelho} title="Excluir pedido" onClick={() => setConfirmExcluirPedido(true)} />
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+            {["pendente", "em_andamento", "entregue"].map(s => (
+              <Btn key={s} onClick={() => atualizarStatus(s)} cor={statusCor[s]} small outline={pedidoSelecionado.status !== s}>
+                {statusLabel[s]}
+              </Btn>
+            ))}
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <Btn onClick={excluirPedido} cor={C.vermelho} small>
+              <Icon name="lixeira" size={15} color={C.branco} /> Excluir Pedido
+            </Btn>
           </div>
 
           <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>COMENTÁRIOS</h4>
@@ -761,23 +763,6 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
         </Modal>
       )}
 
-      {/* Modal Confirmar Exclusão de Pedido */}
-      {confirmExcluirPedido && (
-        <Modal title="Confirmar Exclusão" onClose={() => setConfirmExcluirPedido(false)} width={400}>
-          <p style={{ color: C.cinzaP, fontSize: 14, marginBottom: 8 }}>
-            Deseja excluir este pedido permanentemente?
-          </p>
-          <p style={{ color: C.cinzaT, fontSize: 13, marginBottom: 24 }}>
-            Todos os itens do pedido também serão removidos. Esta ação não pode ser desfeita.
-          </p>
-          <div style={{ display: "flex", gap: 10 }}>
-            <Btn onClick={excluirPedido} cor={C.vermelho} full>
-              <Icon name="lixeira" size={16} color={C.branco} /> Confirmar Exclusão
-            </Btn>
-            <Btn onClick={() => setConfirmExcluirPedido(false)} outline cor={C.cinzaT}>Cancelar</Btn>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 };
