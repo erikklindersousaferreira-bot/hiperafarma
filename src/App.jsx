@@ -930,6 +930,7 @@ const GerenciarFarmacias = ({ farmacias, onAtualizar }) => {
   const [endereco, setEndereco] = useState("");
   const [telefone, setTelefone] = useState("");
   const [loading, setLoading] = useState(false);
+  const [erroNovo, setErroNovo] = useState("");
 
   // Modal visualizar
   const [modalVer, setModalVer] = useState(null);
@@ -951,11 +952,18 @@ const GerenciarFarmacias = ({ farmacias, onAtualizar }) => {
   const cadastrar = async () => {
     if (!nome || !usuario || !senha) return;
     setLoading(true);
+    setErroNovo("");
     try {
+      const existe = await sb(`farmacias?usuario=eq.${encodeURIComponent(usuario)}`);
+      if (existe.length > 0) {
+        setErroNovo("Este usuário já existe. Escolha outro nome de usuário.");
+        setLoading(false);
+        return;
+      }
       await sb("farmacias", { method: "POST", body: JSON.stringify({ nome, usuario, senha_hash: senha, endereco, telefone }) });
-      setModalNovo(false); setNome(""); setUsuario(""); setSenha(""); setEndereco(""); setTelefone("");
+      setModalNovo(false); setErroNovo(""); setNome(""); setUsuario(""); setSenha(""); setEndereco(""); setTelefone("");
       onAtualizar();
-    } catch (e) { alert("Erro ao cadastrar: " + e.message); }
+    } catch (e) { setErroNovo("Erro ao cadastrar: " + e.message); }
     setLoading(false);
   };
 
@@ -1039,15 +1047,20 @@ const GerenciarFarmacias = ({ farmacias, onAtualizar }) => {
 
       {/* Modal Novo */}
       {modalNovo && (
-        <Modal title="Cadastrar Nova Farmácia" onClose={() => setModalNovo(false)}>
+        <Modal title="Cadastrar Nova Farmácia" onClose={() => { if (!loading) { setModalNovo(false); setErroNovo(""); } }}>
           <Input label="Nome da Farmácia" value={nome} onChange={setNome} placeholder="Ex: Hiperafarma Centro" required />
           <Input label="Usuário (login)" value={usuario} onChange={setUsuario} placeholder="Ex: hiperafarma_centro" required />
           <Input label="Senha" value={senha} onChange={setSenha} type="password" placeholder="Senha de acesso" required />
           <Input label="Endereço" value={endereco} onChange={setEndereco} placeholder="Rua, número, bairro" />
           <Input label="Telefone" value={telefone} onChange={setTelefone} placeholder="(99) 99999-9999" />
+          {erroNovo && (
+            <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: "10px 14px", marginBottom: 16, color: C.vermelho, fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+              <Icon name="alerta" size={16} color={C.vermelho} /> {erroNovo}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
             <Btn onClick={cadastrar} disabled={loading} cor={C.azul} full>{loading ? "Salvando..." : "Cadastrar Farmácia"}</Btn>
-            <Btn onClick={() => setModalNovo(false)} outline cor={C.cinzaT}>Cancelar</Btn>
+            <Btn onClick={() => { if (!loading) { setModalNovo(false); setErroNovo(""); } }} outline cor={C.cinzaT}>Cancelar</Btn>
           </div>
         </Modal>
       )}
@@ -1663,6 +1676,14 @@ const ManutencoesDono = ({ farmacias }) => {
     setManutencoes(manutencoes.map(m => m.id === id ? { ...m, status } : m));
   };
 
+  const excluirManutencao = async (id) => {
+    if (!window.confirm("Tem certeza que deseja excluir este chamado?")) return;
+    try {
+      await sb(`manutencoes?id=eq.${id}`, { method: "DELETE", prefer: "return=minimal" });
+      setManutencoes(manutencoes.filter(m => m.id !== id));
+    } catch (e) { alert("Erro ao excluir: " + e.message); }
+  };
+
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Manutenções</h2>
@@ -1686,9 +1707,10 @@ const ManutencoesDono = ({ farmacias }) => {
                         <Badge label={urgenciaLabel[m.urgencia]} cor={urgenciaCor[m.urgencia]} />
                         <Badge label={m.status === "aberto" ? "Aberto" : m.status === "em_andamento" ? "Em andamento" : "Resolvido"} cor={statusCor[m.status]} />
                       </div>
-                      <div style={{ display: "flex", gap: 6 }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                         {m.status === "aberto" && <Btn onClick={() => atualizarStatus(m.id, "em_andamento")} cor={C.azulClaro} small>Em andamento</Btn>}
                         {m.status !== "resolvido" && <Btn onClick={() => atualizarStatus(m.id, "resolvido")} cor={C.verde} small>Resolver</Btn>}
+                        <BtnIcon icon="lixeira" cor={C.vermelho} title="Excluir chamado" onClick={() => excluirManutencao(m.id)} />
                       </div>
                     </div>
                   </div>
