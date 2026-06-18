@@ -1291,6 +1291,8 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
   const [itens, setItens] = useState([{ nome: "", categoria: "generico", laboratorio_id: "", quantidade: 1, motivo: "esgotou" }]);
   const [sugestoes, setSugestoes] = useState([]);
   const [indexAtivo, setIndexAtivo] = useState(null);
+  const [labSearch, setLabSearch] = useState({});
+  const [labOpen, setLabOpen] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const buscarSugestoes = async (texto, index) => {
@@ -1325,13 +1327,7 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
         let produtoId = null;
         try {
           const prods = await sb(`produtos?nome=ilike.${encodeURIComponent(item.nome)}&limit=1`);
-          if (prods.length > 0) {
-            produtoId = prods[0].id;
-            await sb(`produtos?id=eq.${produtoId}`, { method: "PATCH", prefer: "return=minimal", body: JSON.stringify({ total_pedidos: prods[0].total_pedidos + 1 }) });
-          } else {
-            const novoProd = await sb("produtos", { method: "POST", body: JSON.stringify({ nome: item.nome.toUpperCase(), categoria: item.categoria, laboratorio_id: item.laboratorio_id || null }) });
-            produtoId = novoProd[0].id;
-          }
+          if (prods.length > 0) produtoId = prods[0].id;
         } catch {}
 
         const lab = laboratorios.find(l => l.id === item.laboratorio_id);
@@ -1359,6 +1355,8 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
 
       <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700, color: C.preto }}>Itens do Pedido</h3>
 
+      {labOpen !== null && <div onClick={() => setLabOpen(null)} style={{ position: "fixed", inset: 0, zIndex: 150 }} />}
+
       {itens.map((item, i) => (
         <Card key={i} style={{ marginBottom: 12, borderLeft: `4px solid ${categoriaCor[item.categoria]}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -1379,7 +1377,52 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
               )}
             </div>
             <Select label="Categoria" value={item.categoria} onChange={v => editItem(i, "categoria", v)} options={[{ value: "generico", label: "Genérico" }, { value: "etico", label: "Ético" }, { value: "equipamento", label: "Equipamento" }, { value: "outro", label: "Outro" }]} />
-            <Select label="Laboratório" value={item.laboratorio_id} onChange={v => editItem(i, "laboratorio_id", v)} options={laboratorios.map(l => ({ value: l.id, label: l.nome }))} />
+            <div style={{ position: "relative", marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Laboratório</label>
+              <div
+                onClick={() => { setLabOpen(labOpen === i ? null : i); setLabSearch(prev => ({ ...prev, [i]: "" })); }}
+                style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: item.laboratorio_id ? C.preto : C.cinzaT, background: C.branco, boxSizing: "border-box", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: "inherit" }}
+              >
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {laboratorios.find(l => l.id === item.laboratorio_id)?.nome || "Selecione..."}
+                </span>
+                <Icon name="filtro" size={13} color={C.cinzaT} />
+              </div>
+              {labOpen === i && (
+                <div style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, background: C.branco, border: `1.5px solid ${C.cinzaD}`, borderRadius: 10, zIndex: 200, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", display: "flex", flexDirection: "column", maxHeight: 240 }}>
+                  <div style={{ padding: "8px 10px", borderBottom: `1px solid ${C.cinzaE}`, flexShrink: 0 }}>
+                    <input
+                      autoFocus
+                      value={labSearch[i] || ""}
+                      onChange={e => setLabSearch(prev => ({ ...prev, [i]: e.target.value }))}
+                      onClick={e => e.stopPropagation()}
+                      placeholder="Buscar laboratório..."
+                      style={{ width: "100%", padding: "7px 10px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
+                    />
+                  </div>
+                  <div style={{ overflowY: "auto", flex: 1 }}>
+                    <div
+                      onClick={() => { editItem(i, "laboratorio_id", ""); setLabOpen(null); }}
+                      style={{ padding: "10px 14px", cursor: "pointer", fontSize: 13, color: C.cinzaT, borderBottom: `1px solid ${C.cinzaE}`, background: !item.laboratorio_id ? C.cinzaF : "transparent" }}
+                    >
+                      Sem laboratório
+                    </div>
+                    {laboratorios
+                      .filter(l => !labSearch[i] || l.nome.toLowerCase().includes((labSearch[i] || "").toLowerCase()))
+                      .map(l => (
+                        <div
+                          key={l.id}
+                          onClick={() => { editItem(i, "laboratorio_id", l.id); setLabOpen(null); }}
+                          style={{ padding: "10px 14px", cursor: "pointer", fontSize: 13, color: C.preto, background: item.laboratorio_id === l.id ? C.azul + "18" : "transparent", fontWeight: item.laboratorio_id === l.id ? 700 : 400, borderBottom: `1px solid ${C.cinzaE}` }}
+                        >
+                          {l.nome}
+                        </div>
+                      ))
+                    }
+                  </div>
+                </div>
+              )}
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <Input label="Quantidade" value={item.quantidade} onChange={v => editItem(i, "quantidade", parseInt(v) || 1)} type="number" />
               <Select label="Motivo" value={item.motivo} onChange={v => editItem(i, "motivo", v)} options={[{ value: "esgotou", label: "Esgotou" }, { value: "venceu", label: "Venceu" }, { value: "nunca_tivemos", label: "Nunca tivemos" }, { value: "outro", label: "Outro" }]} />
