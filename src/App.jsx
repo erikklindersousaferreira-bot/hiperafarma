@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, createContext, useContext } from "react";
+import { useState, useEffect, useCallback, useRef, createContext, useContext } from "react";
 
 // =============================================
 // CONFIGURAÇÃO SUPABASE
@@ -1293,6 +1293,8 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
   const [indexAtivo, setIndexAtivo] = useState(null);
   const [labSearch, setLabSearch] = useState({});
   const [labOpen, setLabOpen] = useState(null);
+  const [labDirection, setLabDirection] = useState({});
+  const labRefs = useRef({});
   const [loading, setLoading] = useState(false);
 
   const buscarSugestoes = async (texto, index) => {
@@ -1380,7 +1382,21 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
             <div style={{ position: "relative", marginBottom: 16 }}>
               <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Laboratório</label>
               <div
-                onClick={() => { setLabOpen(labOpen === i ? null : i); setLabSearch(prev => ({ ...prev, [i]: "" })); }}
+                ref={el => { labRefs.current[i] = el; }}
+                onClick={() => {
+                  const next = labOpen === i ? null : i;
+                  if (next !== null) {
+                    const el = labRefs.current[i];
+                    if (el) {
+                      const rect = el.getBoundingClientRect();
+                      const spaceBelow = window.innerHeight - rect.bottom;
+                      const spaceAbove = rect.top;
+                      setLabDirection(prev => ({ ...prev, [i]: spaceBelow < 260 && spaceAbove > spaceBelow ? "up" : "down" }));
+                    }
+                  }
+                  setLabOpen(next);
+                  setLabSearch(prev => ({ ...prev, [i]: "" }));
+                }}
                 style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: item.laboratorio_id ? C.preto : C.cinzaT, background: C.branco, boxSizing: "border-box", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: "inherit" }}
               >
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1389,7 +1405,7 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
                 <Icon name="filtro" size={13} color={C.cinzaT} />
               </div>
               {labOpen === i && (
-                <div style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, background: C.branco, border: `1.5px solid ${C.cinzaD}`, borderRadius: 10, zIndex: 200, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", display: "flex", flexDirection: "column", maxHeight: 240 }}>
+                <div style={{ position: "absolute", ...(labDirection[i] === "up" ? { bottom: "calc(100% + 2px)" } : { top: "calc(100% + 2px)" }), left: 0, right: 0, background: C.branco, border: `1.5px solid ${C.cinzaD}`, borderRadius: 10, zIndex: 200, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", display: "flex", flexDirection: "column", maxHeight: 240 }}>
                   <div style={{ padding: "8px 10px", borderBottom: `1px solid ${C.cinzaE}`, flexShrink: 0 }}>
                     <input
                       autoFocus
