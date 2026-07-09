@@ -644,8 +644,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   };
 
   const gerarPDFLab = async () => {
-    if (!labPDF) return;
-    const lab = laboratorios.find(l => l.id === labPDF);
+    const lab = labPDF ? laboratorios.find(l => l.id === labPDF) : null;
     const farmSel = farmPDF ? farmacias.find(f => f.id === farmPDF) : null;
     setLoadingPDF(true);
     try {
@@ -659,10 +658,11 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
         return;
       }
 
-      const itens = await sb(`pedido_itens?laboratorio_id=eq.${labPDF}&pedido_id=in.(${pendingIds.join(",")})&order=nome_produto.asc`);
+      const filtroLab = labPDF ? `laboratorio_id=eq.${labPDF}&` : "";
+      const itens = await sb(`pedido_itens?${filtroLab}pedido_id=in.(${pendingIds.join(",")})&order=nome_laboratorio.asc,nome_produto.asc`);
 
       if (!itens.length) {
-        alert(`Nenhum item pendente para o laboratório "${lab?.nome}".`);
+        alert(lab ? `Nenhum item pendente para o laboratório "${lab.nome}".` : "Nenhum item pendente ou em andamento encontrado.");
         setLoadingPDF(false);
         return;
       }
@@ -671,7 +671,11 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
       const dataStr = new Date().toLocaleDateString("pt-BR");
       const horaStr = new Date().toLocaleString("pt-BR");
 
-      const linhas = itens.map((item, i) => {
+      const tituloPrincipal = lab
+        ? (farmSel ? `Pedido ${lab.nome} — Farmácia ${farmSel.nome}` : `Pedido ${lab.nome} — Todas as Farmácias`)
+        : (farmSel ? `Pedidos — Farmácia ${farmSel.nome}` : `Pedidos — Todas as Farmácias e Laboratórios`);
+
+      const linhaItem = (item, i) => {
         const pedido = pedidos.find(p => p.id === item.pedido_id);
         const farm = farmacias.find(f => f.id === pedido?.farmacia_id);
         return `<tr>
@@ -681,13 +685,40 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
           <td>${escHtml(farm?.nome || "—")}</td>
           <td style="text-align:center;font-weight:700;color:#1A3A8F">${item.quantidade}</td>
         </tr>`;
-      }).join("");
+      };
+
+      const tabelaLab = (labNome, items) => `<table>
+      <thead><tr><th>#</th><th>Produto</th><th>Categoria</th><th>Farmácia</th><th>Qtd</th></tr></thead>
+      <tbody>
+        ${items.map((item, i) => linhaItem(item, i)).join("")}
+        <tr class="total-row"><td colspan="4">Total de itens</td><td style="text-align:center">${items.length}</td></tr>
+      </tbody>
+    </table>`;
+
+      let corpo;
+      if (lab) {
+        corpo = `<h2>Lista de Itens — ${escHtml(lab.nome)}</h2>${tabelaLab(lab.nome, itens)}`;
+      } else {
+        const grupos = {};
+        itens.forEach(item => {
+          const key = item.nome_laboratorio || "__sem_lab__";
+          if (!grupos[key]) grupos[key] = [];
+          grupos[key].push(item);
+        });
+        corpo = Object.entries(grupos).map(([key, items]) => {
+          const labNome = key === "__sem_lab__" ? "Sem Laboratório" : key;
+          return `<div class="lab-section">
+          <div class="lab-header">${escHtml(labNome)}</div>
+          ${tabelaLab(labNome, items)}
+        </div>`;
+        }).join("");
+      }
 
       const html = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>${escHtml(farmSel ? `Pedido ${lab?.nome} — Farmácia ${farmSel.nome}` : `Pedido ${lab?.nome} — Todas as Farmácias`)}</title>
+  <title>${escHtml(tituloPrincipal)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, Helvetica, sans-serif; padding: 40px; color: #0F172A; font-size: 13px; }
@@ -697,11 +728,15 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     .lab-name { font-size: 20px; font-weight: 800; color: #1A3A8F; margin-bottom: 4px; }
     .date { color: #6B7A99; font-size: 12px; }
     h2 { font-size: 15px; font-weight: 700; color: #374151; margin-bottom: 16px; }
+    .lab-section { margin-bottom: 28px; }
+    .lab-section:not(:first-child) { page-break-before: always; break-before: page; }
+    .lab-header { background: #1A3A8F; color: #FFFFFF; padding: 10px 14px; font-weight: 700; font-size: 13px; border-radius: 6px 6px 0 0; margin-bottom: 0; page-break-after: avoid; break-after: avoid; }
     table { width: 100%; border-collapse: collapse; }
     thead tr { background: #1A3A8F; color: #FFFFFF; }
     th { padding: 10px 14px; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
     td { padding: 10px 14px; border-bottom: 1px solid #E8ECF4; }
     tr:nth-child(even) td { background: #F4F6FA; }
+    tr { page-break-inside: avoid; break-inside: avoid; }
     .footer { margin-top: 40px; font-size: 10px; color: #6B7A99; text-align: center; border-top: 1px solid #E8ECF4; padding-top: 16px; }
     .total-row td { font-weight: 700; background: #EFF6FF; border-top: 2px solid #1A3A8F; }
     @media print { body { padding: 20px; } }
@@ -711,30 +746,12 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   <div class="header">
     <img src="https://i.postimg.cc/pVwVTC9j/LOGO-VERTICALL-EM-PNG.png" alt="Hiperafarma" onerror="this.style.display='none'">
     <div class="header-right">
-      <div class="lab-name">${escHtml(farmSel ? `Pedido ${lab?.nome || "Laboratório"} — Farmácia ${farmSel.nome}` : `Pedido ${lab?.nome || "Laboratório"} — Todas as Farmácias`)}</div>
+      <div class="lab-name">${escHtml(tituloPrincipal)}</div>
       <div class="date">Data: ${dataStr}</div>
       <div class="date">Itens pendentes e em andamento</div>
     </div>
   </div>
-  <h2>Lista de Itens — ${escHtml(lab?.nome || "Laboratório")}</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>Produto</th>
-        <th>Categoria</th>
-        <th>Farmácia</th>
-        <th>Qtd</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${linhas}
-      <tr class="total-row">
-        <td colspan="4">Total de itens</td>
-        <td style="text-align:center">${itens.length}</td>
-      </tr>
-    </tbody>
-  </table>
+  ${corpo}
   <div class="footer">Hiperafarma Drogarias — Gerado em ${horaStr} — Documento de uso interno</div>
   <script>window.onload = function() { window.print(); }</script>
 </body>
@@ -903,11 +920,17 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
 
       {/* Modal PDF */}
       {geraPDF && (
-        <Modal title="Gerar PDF por Laboratório" onClose={() => { setGeraPDF(false); setFarmPDF(""); }} width={440}>
+        <Modal title="Gerar PDF de Pedidos" onClose={() => { setGeraPDF(false); setFarmPDF(""); setLabPDF(""); }} width={440}>
           <p style={{ color: C.cinzaT, fontSize: 14, marginBottom: 20 }}>
-            Selecione o laboratório e, opcionalmente, a farmácia para filtrar o PDF.
+            Filtre por laboratório e/ou farmácia, se desejar. Sem filtros, o PDF traz todos os pedidos de todas as farmácias, separados por laboratório (um laboratório por página).
           </p>
-          <Select label="Laboratório" value={labPDF} onChange={setLabPDF} options={laboratorios.map(l => ({ value: l.id, label: l.nome }))} />
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Laboratório (opcional)</label>
+            <select value={labPDF} onChange={e => setLabPDF(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}>
+              <option value="">Todos os laboratórios</option>
+              {laboratorios.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
+            </select>
+          </div>
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Farmácia (opcional)</label>
             <select value={farmPDF} onChange={e => setFarmPDF(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}>
@@ -916,10 +939,10 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
             </select>
           </div>
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-            <Btn onClick={gerarPDFLab} cor={C.vermelho} disabled={!labPDF || loadingPDF} full>
+            <Btn onClick={gerarPDFLab} cor={C.vermelho} disabled={loadingPDF} full>
               <Icon name="pdf" size={16} color={C.branco} /> {loadingPDF ? "Gerando..." : "Gerar e Imprimir PDF"}
             </Btn>
-            <Btn onClick={() => { setGeraPDF(false); setFarmPDF(""); }} outline cor={C.cinzaT}>Cancelar</Btn>
+            <Btn onClick={() => { setGeraPDF(false); setFarmPDF(""); setLabPDF(""); }} outline cor={C.cinzaT}>Cancelar</Btn>
           </div>
         </Modal>
       )}
