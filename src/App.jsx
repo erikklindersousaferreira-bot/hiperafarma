@@ -205,6 +205,19 @@ const Modal = ({ title, onClose, children, width = 560 }) => {
   );
 };
 
+const PdfViewerOverlay = ({ html, onClose }) => {
+  const iframeRef = useRef(null);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: C.branco, zIndex: 2000, display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, padding: "10px 14px", borderBottom: `1px solid ${C.cinzaE}`, flexShrink: 0 }}>
+        <Btn onClick={() => iframeRef.current?.contentWindow?.print()} outline cor={C.azul} small>Imprimir</Btn>
+        <button onClick={onClose} style={{ background: C.cinzaF, border: "none", cursor: "pointer", color: C.cinzaT, padding: 10, borderRadius: 8, display: "flex" }}><Icon name="fechar" size={20} /></button>
+      </div>
+      <iframe ref={iframeRef} title="Documento" srcDoc={html} style={{ flex: 1, width: "100%", border: "none" }} />
+    </div>
+  );
+};
+
 // =============================================
 // TELA DE LOGIN
 // =============================================
@@ -510,6 +523,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   const [loadingPDF, setLoadingPDF] = useState(false);
   const [loadingItens, setLoadingItens] = useState(false);
   const [confirmExcluirPedido, setConfirmExcluirPedido] = useState(false);
+  const [pdfPreviewHtml, setPdfPreviewHtml] = useState(null);
 
   const pedidosFiltrados = pedidos.filter(p => {
     if (filtroFarmacia && p.farmacia_id !== filtroFarmacia) return false;
@@ -624,10 +638,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
 </body>
 </html>`;
 
-    const w = window.open("", "_blank");
-    if (!w) { alert("Pop-up bloqueado. Permita pop-ups e tente novamente."); return; }
-    w.document.write(html);
-    w.document.close();
+    setPdfPreviewHtml(html);
   };
 
   const gerarPDFLab = async () => {
@@ -727,10 +738,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
 </body>
 </html>`;
 
-      const w = window.open("", "_blank");
-      if (!w) { alert("Pop-up bloqueado. Permita pop-ups para este site e tente novamente."); setLoadingPDF(false); return; }
-      w.document.write(html);
-      w.document.close();
+      setPdfPreviewHtml(html);
       setGeraPDF(false);
     } catch (e) {
       alert("Erro ao gerar PDF: " + e.message);
@@ -912,6 +920,10 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
             <Btn onClick={() => { setGeraPDF(false); setFarmPDF(""); }} outline cor={C.cinzaT}>Cancelar</Btn>
           </div>
         </Modal>
+      )}
+
+      {pdfPreviewHtml && (
+        <PdfViewerOverlay html={pdfPreviewHtml} onClose={() => setPdfPreviewHtml(null)} />
       )}
 
     </div>
