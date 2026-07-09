@@ -1285,10 +1285,20 @@ const GerenciarLaboratorios = ({ laboratorios, onAtualizar }) => {
 // =============================================
 // NOVA SOLICITAÇÃO (farmácia)
 // =============================================
+const itemVazio = { nome: "", categoria: "generico", laboratorio_id: "", quantidade: 1, motivo: "esgotou" };
+
 const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
-  const [urgencia, setUrgencia] = useState("normal");
-  const [observacao, setObservacao] = useState("");
-  const [itens, setItens] = useState([{ nome: "", categoria: "generico", laboratorio_id: "", quantidade: 1, motivo: "esgotou" }]);
+  const rascunhoKey = `hiperafarma_rascunho_${farmaciaId}`;
+  const rascunhoSalvo = (() => {
+    try {
+      const salvo = localStorage.getItem(rascunhoKey);
+      return salvo ? JSON.parse(salvo) : null;
+    } catch { return null; }
+  })();
+
+  const [urgencia, setUrgencia] = useState(rascunhoSalvo?.urgencia || "normal");
+  const [observacao, setObservacao] = useState(rascunhoSalvo?.observacao || "");
+  const [itens, setItens] = useState(rascunhoSalvo?.itens || [{ ...itemVazio }]);
   const [sugestoes, setSugestoes] = useState([]);
   const [indexAtivo, setIndexAtivo] = useState(null);
   const [labSearch, setLabSearch] = useState({});
@@ -1296,6 +1306,21 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
   const [labDirection, setLabDirection] = useState({});
   const labRefs = useRef({});
   const [loading, setLoading] = useState(false);
+  const pularProximoSave = useRef(false);
+
+  useEffect(() => {
+    if (pularProximoSave.current) { pularProximoSave.current = false; return; }
+    localStorage.setItem(rascunhoKey, JSON.stringify({ urgencia, observacao, itens }));
+  }, [urgencia, observacao, itens, rascunhoKey]);
+
+  const limparRascunho = () => {
+    if (!window.confirm("Descartar o rascunho e limpar o formulário?")) return;
+    pularProximoSave.current = true;
+    localStorage.removeItem(rascunhoKey);
+    setUrgencia("normal");
+    setObservacao("");
+    setItens([{ ...itemVazio }]);
+  };
 
   const buscarSugestoes = async (texto, index) => {
     setIndexAtivo(index);
@@ -1337,6 +1362,7 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
       }
 
       await sb("logs", { method: "POST", body: JSON.stringify({ farmacia_id: farmaciaId, pedido_id: pedidoId, acao: "Pedido criado", detalhes: `${itens.length} itens` }) });
+      localStorage.removeItem(rascunhoKey);
       onSalvo();
     } catch (e) { alert("Erro ao salvar: " + e.message); }
     setLoading(false);
@@ -1447,8 +1473,9 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
         </Card>
       ))}
 
-      <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+      <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
         <Btn onClick={addItem} outline cor={C.azul}><Icon name="mais" size={16} color={C.azul} /> Adicionar Item</Btn>
+        <Btn onClick={limparRascunho} outline cor={C.vermelho}>Limpar rascunho</Btn>
         <Btn onClick={salvar} disabled={loading} cor={C.azul}>{loading ? "Enviando..." : "Enviar Pedido"}</Btn>
       </div>
     </div>
