@@ -613,12 +613,14 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     .farm-name { font-size: 20px; font-weight: 800; color: #1A3A8F; margin-bottom: 4px; }
     .date { color: #6B7A99; font-size: 12px; }
     .lab-section { margin-bottom: 28px; }
-    .lab-header { background: #1A3A8F; color: #FFFFFF; padding: 10px 14px; font-weight: 700; font-size: 13px; border-radius: 6px 6px 0 0; }
+    .lab-section:not(:first-child) { page-break-before: always; break-before: page; }
+    .lab-header { background: #1A3A8F; color: #FFFFFF; padding: 10px 14px; font-weight: 700; font-size: 13px; border-radius: 6px 6px 0 0; page-break-after: avoid; break-after: avoid; }
     table { width: 100%; border-collapse: collapse; }
     thead tr { background: #E8ECF4; }
     th { padding: 8px 14px; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
     td { padding: 10px 14px; border-bottom: 1px solid #E8ECF4; }
     tr:nth-child(even) td { background: #F4F6FA; }
+    tr { page-break-inside: avoid; break-inside: avoid; }
     .footer { margin-top: 40px; font-size: 10px; color: #6B7A99; text-align: center; border-top: 1px solid #E8ECF4; padding-top: 16px; }
     @media print { body { padding: 20px; } }
   </style>
