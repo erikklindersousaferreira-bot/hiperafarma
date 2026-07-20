@@ -48,8 +48,8 @@ const C = {
 
 const urgenciaCor = { normal: C.verde, urgente: C.amarelo, critico: C.vermelho, emergencia: C.vermelho };
 const urgenciaLabel = { normal: "Normal", urgente: "Urgente", critico: "Crítico", emergencia: "Emergência" };
-const statusCor = { pendente: C.amarelo, em_andamento: C.azulClaro, entregue: C.verde, cancelado: C.cinzaT, aberto: C.vermelho, resolvido: C.verde };
-const statusLabel = { pendente: "Pendente", em_andamento: "Em andamento", entregue: "Entregue", cancelado: "Cancelado", aberto: "Aberto", resolvido: "Resolvido" };
+const statusCor = { pendente: C.amarelo, em_andamento: C.azulClaro, entregue: C.verde, cancelado: C.cinzaT, aberto: C.vermelho, resolvido: C.verde, revisado: C.verde };
+const statusLabel = { pendente: "Pendente", em_andamento: "Em andamento", entregue: "Entregue", cancelado: "Cancelado", aberto: "Aberto", resolvido: "Resolvido", revisado: "Revisado" };
 const categoriaLabel = { generico: "Genérico", etico: "Ético", equipamento: "Equipamento", outro: "Outro" };
 const categoriaCor = { generico: C.azulClaro, etico: "#7C3AED", equipamento: C.laranja, outro: C.cinzaT };
 
@@ -87,6 +87,7 @@ const Icon = ({ name, size = 20, color = "currentColor" }) => {
     lixeira: <><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></>,
     laboratorio: <><line x1="9" y1="3" x2="15" y2="3"/><polyline points="9,3 5,20 19,20 15,3"/><line x1="7" y1="13" x2="17" y2="13"/></>,
     hamburger: <><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></>,
+    deposito: <><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3.27 8L12 13l8.73-5"/><line x1="12" y1="22" x2="12" y2="13"/></>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -292,6 +293,7 @@ const Sidebar = ({ ativo, setAtivo, isDono, farmacia, onSair, isOpen, onClose })
   const menuDono = [
     { id: "dashboard", label: "Painel Central", icon: "home" },
     { id: "pedidos", label: "Pedidos", icon: "pedidos" },
+    { id: "deposito", label: "Depósito", icon: "deposito" },
     { id: "manutencoes", label: "Manutenções", icon: "manutencao" },
     { id: "farmacias", label: "Farmácias", icon: "farmacias" },
     { id: "laboratorios", label: "Laboratórios", icon: "laboratorio" },
@@ -794,6 +796,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
               <option value="pendente">Pendente</option>
               <option value="em_andamento">Em Andamento</option>
               <option value="entregue">Entregue</option>
+              <option value="revisado">Revisado</option>
             </select>
           </div>
           <div style={{ flex: 1, minWidth: 140 }}>
@@ -951,6 +954,143 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
         <PdfViewerOverlay html={pdfPreviewHtml} onClose={() => setPdfPreviewHtml(null)} />
       )}
 
+    </div>
+  );
+};
+
+// =============================================
+// DEPÓSITO (revisão de estoque — dono)
+// =============================================
+const Deposito = ({ pedidos, farmacias, onAtualizar }) => {
+  const [itensCount, setItensCount] = useState({});
+  const [pedidoSelecionado, setPedidoSelecionado] = useState(null);
+  const [itensPedido, setItensPedido] = useState([]);
+  const [marcados, setMarcados] = useState({});
+  const [loadingItens, setLoadingItens] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+
+  const pedidosDeposito = pedidos.filter(p => p.status === "pendente" || p.status === "em_andamento");
+
+  useEffect(() => {
+    const carregarContagens = async () => {
+      if (!pedidosDeposito.length) { setItensCount({}); return; }
+      try {
+        const itens = await sb(`pedido_itens?pedido_id=in.(${pedidosDeposito.map(p => p.id).join(",")})&select=pedido_id`);
+        const contagem = {};
+        itens.forEach(i => { contagem[i.pedido_id] = (contagem[i.pedido_id] || 0) + 1; });
+        setItensCount(contagem);
+      } catch {}
+    };
+    carregarContagens();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedidos]);
+
+  const abrirPedido = async (pedido) => {
+    setPedidoSelecionado(pedido);
+    setItensPedido([]);
+    setMarcados({});
+    setLoadingItens(true);
+    const itens = await sb(`pedido_itens?pedido_id=eq.${pedido.id}&order=criado_em.asc`);
+    setItensPedido(itens);
+    setLoadingItens(false);
+  };
+
+  const toggleMarcado = (id) => setMarcados(m => ({ ...m, [id]: !m[id] }));
+
+  const concluirRevisao = async () => {
+    setSalvando(true);
+    try {
+      const idsParaRemover = itensPedido.filter(i => marcados[i.id]).map(i => i.id);
+      if (idsParaRemover.length) {
+        await sb(`pedido_itens?id=in.(${idsParaRemover.join(",")})`, { method: "DELETE", prefer: "return=minimal" });
+      }
+      await sb(`pedidos?id=eq.${pedidoSelecionado.id}`, { method: "PATCH", prefer: "return=minimal", body: JSON.stringify({ status: "revisado" }) });
+      setPedidoSelecionado(null);
+      onAtualizar();
+    } catch (e) { alert("Erro ao concluir revisão: " + e.message); }
+    setSalvando(false);
+  };
+
+  return (
+    <div>
+      <div style={{ marginBottom: 24 }}>
+        <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Depósito</h2>
+        <p style={{ margin: 0, color: C.cinzaT, fontSize: 14 }}>{pedidosDeposito.length} pedidos aguardando revisão de estoque</p>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {pedidosDeposito.length === 0 ? (
+          <Card><p style={{ color: C.cinzaT, textAlign: "center", margin: 0 }}>Nenhum pedido pendente para revisão.</p></Card>
+        ) : pedidosDeposito.map(p => {
+          const farm = farmacias.find(f => f.id === p.farmacia_id);
+          return (
+            <Card key={p.id} style={{ padding: 16, cursor: "pointer", transition: "box-shadow 0.15s" }} onClick={() => abrirPedido(p)}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                  <div style={{ width: 44, height: 44, background: urgenciaCor[p.urgencia] + "20", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <Icon name="deposito" size={20} color={urgenciaCor[p.urgencia]} />
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: C.preto }}>{farm?.nome || "Farmácia"}</div>
+                    <div style={{ fontSize: 12, color: C.cinzaT }}>{new Date(p.criado_em).toLocaleString("pt-BR")}</div>
+                    <div style={{ fontSize: 12, color: C.cinzaP, marginTop: 2 }}>{itensCount[p.id] || 0} itens</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
+                  <Badge label={statusLabel[p.status]} cor={statusCor[p.status]} />
+                  <BtnIcon icon="olho" cor={C.azulClaro} title="Revisar pedido" onClick={e => { e.stopPropagation(); abrirPedido(p); }} />
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+
+      {pedidoSelecionado && (
+        <Modal title={`Revisão de Estoque — ${farmacias.find(f => f.id === pedidoSelecionado.farmacia_id)?.nome}`} onClose={() => setPedidoSelecionado(null)} width={680}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 20, alignItems: "center", flexWrap: "wrap" }}>
+            <Badge label={urgenciaLabel[pedidoSelecionado.urgencia]} cor={urgenciaCor[pedidoSelecionado.urgencia]} />
+            <Badge label={statusLabel[pedidoSelecionado.status]} cor={statusCor[pedidoSelecionado.status]} />
+            <span style={{ fontSize: 12, color: C.cinzaT }}>{new Date(pedidoSelecionado.criado_em).toLocaleString("pt-BR")}</span>
+          </div>
+
+          {pedidoSelecionado.observacao && (
+            <div style={{ background: C.cinzaF, borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 14, color: C.cinzaP }}>
+              📝 {pedidoSelecionado.observacao}
+            </div>
+          )}
+
+          <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>ITENS DO PEDIDO</h4>
+          <div style={{ background: C.cinzaF, borderRadius: 12, overflow: "hidden", marginBottom: 20 }}>
+            {loadingItens ? (
+              <p style={{ padding: 16, color: C.cinzaT, margin: 0, textAlign: "center" }}>Carregando itens...</p>
+            ) : itensPedido.length === 0 ? (
+              <p style={{ padding: 16, color: C.cinzaT, margin: 0, textAlign: "center" }}>Nenhum item encontrado.</p>
+            ) : itensPedido.map((item, i) => (
+              <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 16px", borderBottom: i < itensPedido.length - 1 ? `1px solid ${C.cinzaE}` : "none" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: C.preto }}>{item.nome_produto}</div>
+                  <div style={{ fontSize: 12, color: C.cinzaT, marginTop: 2 }}>
+                    {item.nome_laboratorio ? `🏭 ${item.nome_laboratorio}` : "Sem laboratório"}
+                    {" • "}
+                    {categoriaLabel[item.categoria] || item.categoria}
+                    {" • ×"}{item.quantidade}
+                  </div>
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flexShrink: 0 }}>
+                  <input type="checkbox" checked={!!marcados[item.id]} onChange={() => toggleMarcado(item.id)} style={{ width: 18, height: 18, accentColor: C.verde, cursor: "pointer" }} />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: C.cinzaP }}>Tem no estoque</span>
+                </label>
+              </div>
+            ))}
+          </div>
+
+          <Btn onClick={concluirRevisao} cor={C.verde} full disabled={salvando || loadingItens}>
+            <Icon name="check" size={16} color={C.branco} /> {salvando ? "Salvando..." : "Concluir Revisão"}
+          </Btn>
+        </Modal>
+      )}
     </div>
   );
 };
@@ -1947,6 +2087,7 @@ export default function App() {
       switch (ativo) {
         case "dashboard": return <Dashboard stats={stats} pedidos={pedidos} manutencoes={manutencoes} farmacias={farmacias} />;
         case "pedidos": return <PedidosDono pedidos={pedidos} farmacias={farmacias} laboratorios={laboratorios} onAtualizar={carregarDados} />;
+        case "deposito": return <Deposito pedidos={pedidos} farmacias={farmacias} onAtualizar={carregarDados} />;
         case "manutencoes": return <ManutencoesDono farmacias={farmacias} />;
         case "farmacias": return <GerenciarFarmacias farmacias={farmacias} onAtualizar={carregarDados} />;
         case "laboratorios": return <GerenciarLaboratorios laboratorios={laboratorios} onAtualizar={carregarDados} />;
