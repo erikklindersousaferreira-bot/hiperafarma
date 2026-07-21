@@ -50,8 +50,43 @@ const urgenciaCor = { normal: C.verde, urgente: C.amarelo, critico: C.vermelho, 
 const urgenciaLabel = { normal: "Normal", urgente: "Urgente", critico: "Crítico", emergencia: "Emergência" };
 const statusCor = { pendente: C.amarelo, em_andamento: C.azulClaro, entregue: C.verde, cancelado: C.cinzaT, aberto: C.vermelho, resolvido: C.verde, revisado: C.verde };
 const statusLabel = { pendente: "Pendente", em_andamento: "Em andamento", entregue: "Entregue", cancelado: "Cancelado", aberto: "Aberto", resolvido: "Resolvido", revisado: "Revisado" };
-const categoriaLabel = { generico: "Genérico", etico: "Ético", equipamento: "Equipamento", outro: "Outro" };
-const categoriaCor = { generico: C.azulClaro, etico: "#7C3AED", equipamento: C.laranja, outro: C.cinzaT };
+const categoriaLabel = {
+  eticos: "Éticos",
+  genericos: "Genéricos",
+  vitaminas: "Vitaminas",
+  controlados: "Controlados",
+  mercearia: "Mercearia",
+  perfumaria: "Perfumaria",
+  fraldas: "Fraldas",
+  leites: "Leites",
+  preservativos: "Preservativos",
+  suplementos: "Suplementos",
+  injetaveis: "Injetáveis",
+  bebidas: "Bebidas",
+  varejo: "Varejo",
+  mamadeiras_chupetas: "Mamadeiras e chupetas",
+  produtos_hospitalar: "Produtos hospitalar",
+  ortopedicos: "Ortopédicos",
+};
+const categoriaCor = {
+  eticos: "#7C3AED",
+  genericos: C.azulClaro,
+  vitaminas: C.verde,
+  controlados: C.vermelho,
+  mercearia: C.laranja,
+  perfumaria: "#DB2777",
+  fraldas: "#0891B2",
+  leites: "#CA8A04",
+  preservativos: "#E11D48",
+  suplementos: C.verdeClaro,
+  injetaveis: "#0EA5E9",
+  bebidas: C.amarelo,
+  varejo: C.cinzaP,
+  mamadeiras_chupetas: "#F97316",
+  produtos_hospitalar: "#B91C1C",
+  ortopedicos: "#64748B",
+};
+const categoriaOptions = Object.entries(categoriaLabel).map(([value, label]) => ({ value, label }));
 
 const escHtml = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -669,7 +704,6 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
         return;
       }
 
-      const cats = { generico: "Genérico", etico: "Ético", equipamento: "Equipamento", outro: "Outro" };
       const dataStr = new Date().toLocaleDateString("pt-BR");
       const horaStr = new Date().toLocaleString("pt-BR");
 
@@ -683,7 +717,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
         return `<tr>
           <td>${i + 1}</td>
           <td><strong>${escHtml(item.nome_produto)}</strong></td>
-          <td>${escHtml(cats[item.categoria] || item.categoria)}</td>
+          <td>${escHtml(categoriaLabel[item.categoria] || item.categoria)}</td>
           <td>${escHtml(farm?.nome || "—")}</td>
           <td style="text-align:center;font-weight:700;color:#1A3A8F">${item.quantidade}</td>
         </tr>`;
@@ -1462,7 +1496,7 @@ const GerenciarLaboratorios = ({ laboratorios, onAtualizar }) => {
 // =============================================
 // NOVA SOLICITAÇÃO (farmácia)
 // =============================================
-const itemVazio = { nome: "", categoria: "generico", laboratorio_id: "", quantidade: 1, motivo: "esgotou" };
+const itemVazio = { nome: "", categoria: "eticos", laboratorio_id: "", quantidade: 1, motivo: "esgotou" };
 
 const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
   const rascunhoKey = `hiperafarma_rascunho_${farmaciaId}`;
@@ -1516,7 +1550,7 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
     setIndexAtivo(null);
   };
 
-  const addItem = () => setItens([...itens, { nome: "", categoria: "generico", laboratorio_id: "", quantidade: 1, motivo: "esgotou" }]);
+  const addItem = () => setItens([...itens, { nome: "", categoria: "eticos", laboratorio_id: "", quantidade: 1, motivo: "esgotou" }]);
   const remItem = (i) => setItens(itens.filter((_, idx) => idx !== i));
   const editItem = (i, campo, val) => { const n = [...itens]; n[i][campo] = val; setItens(n); };
 
@@ -1581,7 +1615,7 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
                 </div>
               )}
             </div>
-            <Select label="Categoria" value={item.categoria} onChange={v => editItem(i, "categoria", v)} options={[{ value: "generico", label: "Genérico" }, { value: "etico", label: "Ético" }, { value: "equipamento", label: "Equipamento" }, { value: "outro", label: "Outro" }]} />
+            <Select label="Categoria" value={item.categoria} onChange={v => editItem(i, "categoria", v)} options={categoriaOptions} />
             <div style={{ position: "relative", marginBottom: 16 }}>
               <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Laboratório</label>
               <div
