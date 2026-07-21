@@ -123,6 +123,7 @@ const Icon = ({ name, size = 20, color = "currentColor" }) => {
     laboratorio: <><line x1="9" y1="3" x2="15" y2="3"/><polyline points="9,3 5,20 19,20 15,3"/><line x1="7" y1="13" x2="17" y2="13"/></>,
     hamburger: <><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></>,
     deposito: <><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3.27 8L12 13l8.73-5"/><line x1="12" y1="22" x2="12" y2="13"/></>,
+    repetir: <><polyline points="23,4 23,10 17,10"/><polyline points="1,20 1,14 7,14"/><path d="M3.51 9a9 9 0 0114.13-3.36L23 10M1 14l5.36 4.36A9 9 0 0020.49 15"/></>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1498,9 +1499,11 @@ const GerenciarLaboratorios = ({ laboratorios, onAtualizar }) => {
 // =============================================
 const itemVazio = { nome: "", categoria: "eticos", laboratorio_id: "", quantidade: 1, motivo: "esgotou" };
 
-const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
+const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo, itensIniciais, onConsumirItensIniciais }) => {
   const rascunhoKey = `hiperafarma_rascunho_${farmaciaId}`;
+  const temItensIniciais = !!(itensIniciais && itensIniciais.length);
   const rascunhoSalvo = (() => {
+    if (temItensIniciais) return null;
     try {
       const salvo = localStorage.getItem(rascunhoKey);
       return salvo ? JSON.parse(salvo) : null;
@@ -1509,7 +1512,7 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
 
   const [urgencia, setUrgencia] = useState(rascunhoSalvo?.urgencia || "normal");
   const [observacao, setObservacao] = useState(rascunhoSalvo?.observacao || "");
-  const [itens, setItens] = useState(rascunhoSalvo?.itens || [{ ...itemVazio }]);
+  const [itens, setItens] = useState(temItensIniciais ? itensIniciais : (rascunhoSalvo?.itens || [{ ...itemVazio }]));
   const [sugestoes, setSugestoes] = useState([]);
   const [indexAtivo, setIndexAtivo] = useState(null);
   const [labSearch, setLabSearch] = useState({});
@@ -1518,6 +1521,11 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
   const labRefs = useRef({});
   const [loading, setLoading] = useState(false);
   const pularProximoSave = useRef(false);
+
+  useEffect(() => {
+    if (temItensIniciais) onConsumirItensIniciais?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (pularProximoSave.current) { pularProximoSave.current = false; return; }
@@ -1696,7 +1704,7 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo }) => {
 // =============================================
 // PEDIDOS DA FARMÁCIA
 // =============================================
-const MeusPedidos = ({ farmaciaId }) => {
+const MeusPedidos = ({ farmaciaId, onRepetir }) => {
   const [pedidos, setPedidos] = useState([]);
   const [pedidoSel, setPedidoSel] = useState(null);
   const [itens, setItens] = useState([]);
@@ -1704,6 +1712,7 @@ const MeusPedidos = ({ farmaciaId }) => {
   const [novoComentario, setNovoComentario] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingItens, setLoadingItens] = useState(false);
+  const [repetindo, setRepetindo] = useState(null);
 
   useEffect(() => {
     sb(`pedidos?farmacia_id=eq.${farmaciaId}&order=criado_em.desc`).then(d => { setPedidos(d); setLoading(false); });
@@ -1735,6 +1744,26 @@ const MeusPedidos = ({ farmaciaId }) => {
     setPedidos(pedidos.map(p => p.id === pedidoSel.id ? { ...p, status: "entregue" } : p));
   };
 
+  const repetirPedido = async (p, e) => {
+    e.stopPropagation();
+    setRepetindo(p.id);
+    try {
+      const it = await sb(`pedido_itens?pedido_id=eq.${p.id}&order=criado_em.asc`);
+      if (!it.length) {
+        alert("Este pedido não possui itens para repetir.");
+      } else {
+        onRepetir(it.map(item => ({
+          nome: item.nome_produto,
+          categoria: item.categoria,
+          laboratorio_id: item.laboratorio_id || "",
+          quantidade: item.quantidade,
+          motivo: item.motivo || "esgotou",
+        })));
+      }
+    } catch (e) { alert("Erro ao carregar itens do pedido: " + e.message); }
+    setRepetindo(null);
+  };
+
   if (loading) return <p style={{ color: C.cinzaT }}>Carregando pedidos...</p>;
 
   return (
@@ -1745,8 +1774,8 @@ const MeusPedidos = ({ farmaciaId }) => {
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {pedidos.length === 0 ? <Card><p style={{ color: C.cinzaT, textAlign: "center", margin: 0 }}>Você ainda não fez nenhum pedido.</p></Card> :
           pedidos.map(p => (
-            <Card key={p.id} style={{ padding: 16, cursor: "pointer" }} onClick={() => abrirPedido(p)}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <Card key={p.id} style={{ padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }} onClick={() => abrirPedido(p)}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <div style={{ width: 42, height: 42, background: statusCor[p.status] + "20", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <Icon name="pedidos" size={20} color={statusCor[p.status]} />
@@ -1761,6 +1790,11 @@ const MeusPedidos = ({ farmaciaId }) => {
                   <Badge label={statusLabel[p.status]} cor={statusCor[p.status]} />
                   <BtnIcon icon="olho" cor={C.azulClaro} title="Ver pedido" onClick={e => { e.stopPropagation(); abrirPedido(p); }} />
                 </div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.cinzaE}` }}>
+                <Btn onClick={e => repetirPedido(p, e)} outline cor={C.azul} small disabled={repetindo === p.id}>
+                  <Icon name="repetir" size={14} color={C.azul} /> {repetindo === p.id ? "Carregando..." : "Repetir Pedido"}
+                </Btn>
               </div>
             </Card>
           ))
@@ -2035,6 +2069,12 @@ export default function App() {
   const [carregando, setCarregando] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [itensRepetir, setItensRepetir] = useState(null);
+
+  const repetirPedido = (itensForm) => {
+    setItensRepetir(itensForm);
+    setAtivo("nova-solicitacao");
+  };
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 768);
@@ -2137,8 +2177,8 @@ export default function App() {
       }
     } else {
       switch (ativo) {
-        case "meus-pedidos": return <MeusPedidos farmaciaId={usuario.id} />;
-        case "nova-solicitacao": return <NovaSolicitacao farmaciaId={usuario.id} laboratorios={laboratorios} onSalvo={() => { setAtivo("meus-pedidos"); carregarDados(); }} />;
+        case "meus-pedidos": return <MeusPedidos farmaciaId={usuario.id} onRepetir={repetirPedido} />;
+        case "nova-solicitacao": return <NovaSolicitacao farmaciaId={usuario.id} laboratorios={laboratorios} itensIniciais={itensRepetir} onConsumirItensIniciais={() => setItensRepetir(null)} onSalvo={() => { setAtivo("meus-pedidos"); carregarDados(); }} />;
         case "manutencao-farm": return <ManutencaoFarmacia farmaciaId={usuario.id} />;
         case "previsao-farm": return <Previsao farmaciaId={usuario.id} isDono={false} farmacias={farmacias} />;
         default: return null;
