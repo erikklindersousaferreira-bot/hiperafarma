@@ -324,12 +324,12 @@ const Login = ({ onLogin }) => {
 // =============================================
 // SIDEBAR
 // =============================================
-const Sidebar = ({ ativo, setAtivo, isDono, farmacia, onSair, isOpen, onClose }) => {
+const Sidebar = ({ ativo, setAtivo, isDono, farmacia, onSair, isOpen, onClose, aguardandoDeposito = 0 }) => {
   const isMobile = useMobile();
   const menuDono = [
     { id: "dashboard", label: "Painel Central", icon: "home" },
     { id: "pedidos", label: "Pedidos", icon: "pedidos" },
-    { id: "deposito", label: "Depósito", icon: "deposito" },
+    { id: "deposito", label: "Depósito", icon: "deposito", badge: aguardandoDeposito },
     { id: "manutencoes", label: "Manutenções", icon: "manutencao" },
     { id: "farmacias", label: "Farmácias", icon: "farmacias" },
     { id: "laboratorios", label: "Laboratórios", icon: "laboratorio" },
@@ -380,6 +380,11 @@ const Sidebar = ({ ativo, setAtivo, isDono, farmacia, onSair, isOpen, onClose })
             }}>
               <Icon name={item.icon} size={18} color={ativo === item.id ? C.azul : "rgba(255,255,255,0.7)"} />
               {item.label}
+              {!!item.badge && (
+                <span style={{ marginLeft: "auto", background: ativo === item.id ? C.vermelho : C.amarelo, color: C.branco, borderRadius: 20, padding: "1px 8px", fontSize: 11, fontWeight: 800 }}>
+                  {item.badge}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -458,7 +463,7 @@ const BottomNav = ({ ativo, setAtivo, isDono }) => {
 // =============================================
 // DASHBOARD DO DONO
 // =============================================
-const Dashboard = ({ stats, pedidos, manutencoes, farmacias }) => {
+const Dashboard = ({ stats, pedidos, manutencoes, farmacias, aguardandoDeposito = 0, onIrDeposito }) => {
   const isMobile = useMobile();
   const cardsDesktop = [
     { label: "Pedidos Pendentes", valor: stats.pendentes, cor: C.amarelo, icon: "pedidos" },
@@ -481,6 +486,24 @@ const Dashboard = ({ stats, pedidos, manutencoes, farmacias }) => {
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Painel Central</h2>
       <p style={{ margin: "0 0 28px", color: C.cinzaT, fontSize: 14 }}>Visão geral da rede Hiperafarma</p>
+
+      {aguardandoDeposito > 0 && (
+        <div onClick={onIrDeposito} style={{
+          display: "flex", alignItems: "center", gap: 14, cursor: onIrDeposito ? "pointer" : "default",
+          background: "#FFF7E6", border: `1.5px solid ${C.amarelo}`, borderRadius: 14, padding: "16px 20px", marginBottom: 24,
+        }}>
+          <div style={{ width: 42, height: 42, background: C.amarelo + "30", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Icon name="deposito" size={20} color={C.amarelo} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: C.preto }}>
+              {aguardandoDeposito} pedido{aguardandoDeposito > 1 ? "s" : ""} aguardando conferência no Depósito
+            </div>
+            <div style={{ fontSize: 13, color: C.cinzaT }}>Esses pedidos só aparecem no painel de Pedidos depois de liberados aqui.</div>
+          </div>
+          <Btn onClick={onIrDeposito} cor={C.amarelo} small>Ir para o Depósito</Btn>
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(180px, 1fr))", gap: isMobile ? 10 : 16, marginBottom: 28 }}>
         {cards.map(c => (
@@ -1952,7 +1975,10 @@ const MeusPedidos = ({ farmaciaId, onRepetir }) => {
   };
 
   const QUINZE_DIAS_MS = 15 * 24 * 60 * 60 * 1000;
-  const podeRepetir = (p) => p.status === "entregue" && p.entregue_em && (Date.now() - new Date(p.entregue_em).getTime()) <= QUINZE_DIAS_MS;
+  // Regra dos 15 dias baseada na data do pedido: na prática a maioria dos pedidos nunca
+  // é marcada como "entregue" (status fica em pendente/em_andamento), então basear a
+  // regra no status escondia "Repetir Pedido" em quase todos os pedidos recentes.
+  const podeRepetir = (p) => (Date.now() - new Date(p.criado_em).getTime()) <= QUINZE_DIAS_MS;
 
   const repetirPedido = async (p, e) => {
     e.stopPropagation();
@@ -2549,11 +2575,12 @@ export default function App() {
     farmacias: farmacias.filter(f => f.usuario !== "admin").length,
     hoje: pedidos.filter(p => new Date(p.criado_em).toDateString() === new Date().toDateString()).length,
   };
+  const aguardandoDeposito = pedidos.filter(p => p.liberado_deposito === false).length;
 
   const renderConteudo = () => {
     if (usuario.isDono) {
       switch (ativo) {
-        case "dashboard": return <Dashboard stats={stats} pedidos={pedidos} manutencoes={manutencoes} farmacias={farmacias} />;
+        case "dashboard": return <Dashboard stats={stats} pedidos={pedidos} manutencoes={manutencoes} farmacias={farmacias} aguardandoDeposito={aguardandoDeposito} onIrDeposito={() => setAtivo("deposito")} />;
         case "pedidos": return <PedidosDono pedidos={pedidos} farmacias={farmacias} laboratorios={laboratorios} onAtualizar={carregarDados} />;
         case "deposito": return <Deposito pedidos={pedidos} farmacias={farmacias} onAtualizar={carregarDados} />;
         case "manutencoes": return <ManutencoesDono farmacias={farmacias} />;
@@ -2588,6 +2615,7 @@ export default function App() {
           ativo={ativo} setAtivo={setAtivo} isDono={usuario.isDono}
           farmacia={usuario} onSair={fazerLogout}
           isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)}
+          aguardandoDeposito={usuario.isDono ? aguardandoDeposito : 0}
         />
         <main style={{
           flex: 1,
