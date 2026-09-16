@@ -551,6 +551,8 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   const [filtroFarmacia, setFiltroFarmacia] = useState("");
   const [filtroStatus, setFiltroStatus] = useState("");
   const [filtroUrgencia, setFiltroUrgencia] = useState("");
+  const [filtroSecao, setFiltroSecao] = useState("");
+  const [categoriasPorPedido, setCategoriasPorPedido] = useState({});
   const [pedidoSelecionado, setPedidoSelecionado] = useState(null);
   const [itensPedido, setItensPedido] = useState([]);
   const [comentarios, setComentarios] = useState([]);
@@ -558,17 +560,60 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   const [geraPDF, setGeraPDF] = useState(false);
   const [labPDF, setLabPDF] = useState("");
   const [farmPDF, setFarmPDF] = useState("");
+  const [secaoPDF, setSecaoPDF] = useState("");
   const [loadingPDF, setLoadingPDF] = useState(false);
   const [loadingItens, setLoadingItens] = useState(false);
   const [confirmExcluirPedido, setConfirmExcluirPedido] = useState(false);
   const [pdfPreviewHtml, setPdfPreviewHtml] = useState(null);
 
-  const pedidosFiltrados = pedidos.filter(p => {
+  // Só entram no painel de Pedidos os pedidos já liberados pelo Depósito.
+  const pedidosLiberados = pedidos.filter(p => p.liberado_deposito !== false);
+
+  useEffect(() => {
+    const carregarCategorias = async () => {
+      if (!filtroSecao || !pedidosLiberados.length) return;
+      try {
+        const ids = pedidosLiberados.map(p => p.id).join(",");
+        const itens = await sb(`pedido_itens?pedido_id=in.(${ids})&select=pedido_id,categoria`);
+        const mapa = {};
+        itens.forEach(i => { (mapa[i.pedido_id] || (mapa[i.pedido_id] = new Set())).add(i.categoria); });
+        setCategoriasPorPedido(mapa);
+      } catch {}
+    };
+    carregarCategorias();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtroSecao, pedidos]);
+
+  const pedidosFiltrados = pedidosLiberados.filter(p => {
     if (filtroFarmacia && p.farmacia_id !== filtroFarmacia) return false;
     if (filtroStatus && p.status !== filtroStatus) return false;
     if (filtroUrgencia && p.urgencia !== filtroUrgencia) return false;
+    if (filtroSecao && !(categoriasPorPedido[p.id] || new Set()).has(filtroSecao)) return false;
     return true;
   });
+
+  const agora = new Date();
+  const inicioHoje = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate());
+  const diaSemana = (inicioHoje.getDay() + 6) % 7; // 0 = segunda
+  const inicioSemana = new Date(inicioHoje); inicioSemana.setDate(inicioHoje.getDate() - diaSemana);
+  const inicioSemanaPassada = new Date(inicioSemana); inicioSemanaPassada.setDate(inicioSemana.getDate() - 7);
+
+  const gruposPeriodo = [
+    { titulo: "Hoje", pedidos: [] },
+    { titulo: "Esta semana", pedidos: [] },
+    { titulo: "Semana passada", pedidos: [] },
+    { titulo: "Anteriores", pedidos: [] },
+  ];
+  pedidosFiltrados
+    .slice()
+    .sort((a, b) => new Date(b.criado_em) - new Date(a.criado_em))
+    .forEach(p => {
+      const data = new Date(p.criado_em);
+      if (data >= inicioHoje) gruposPeriodo[0].pedidos.push(p);
+      else if (data >= inicioSemana) gruposPeriodo[1].pedidos.push(p);
+      else if (data >= inicioSemanaPassada) gruposPeriodo[2].pedidos.push(p);
+      else gruposPeriodo[3].pedidos.push(p);
+    });
 
   const abrirPedido = async (pedido) => {
     setPedidoSelecionado(pedido);
@@ -593,10 +638,12 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   };
 
   const atualizarStatus = async (novoStatus) => {
-    await sb(`pedidos?id=eq.${pedidoSelecionado.id}`, { method: "PATCH", body: JSON.stringify({ status: novoStatus }) });
+    const body = { status: novoStatus };
+    if (novoStatus === "entregue") body.entregue_em = new Date().toISOString();
+    await sb(`pedidos?id=eq.${pedidoSelecionado.id}`, { method: "PATCH", body: JSON.stringify(body) });
     await sb(`logs`, { method: "POST", body: JSON.stringify({ pedido_id: pedidoSelecionado.id, farmacia_id: pedidoSelecionado.farmacia_id, acao: `Status atualizado para: ${statusLabel[novoStatus]}` }) });
     onAtualizar();
-    setPedidoSelecionado({ ...pedidoSelecionado, status: novoStatus });
+    setPedidoSelecionado({ ...pedidoSelecionado, ...body });
   };
 
   const excluirPedido = async () => {
@@ -687,7 +734,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     setLoadingPDF(true);
     try {
       const pendingIds = pedidos
-        .filter(p => (p.status === "pendente" || p.status === "em_andamento") && (!farmPDF || p.farmacia_id === farmPDF))
+        .filter(p => p.liberado_deposito !== false && (p.status === "pendente" || p.status === "em_andamento") && (!farmPDF || p.farmacia_id === farmPDF))
         .map(p => p.id);
 
       if (!pendingIds.length) {
@@ -697,7 +744,8 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
       }
 
       const filtroLab = labPDF ? `laboratorio_id=eq.${labPDF}&` : "";
-      const itens = await sb(`pedido_itens?${filtroLab}pedido_id=in.(${pendingIds.join(",")})&order=nome_laboratorio.asc,nome_produto.asc`);
+      const filtroSecaoPDF = secaoPDF ? `categoria=eq.${secaoPDF}&` : "";
+      const itens = await sb(`pedido_itens?${filtroLab}${filtroSecaoPDF}pedido_id=in.(${pendingIds.join(",")})&order=nome_laboratorio.asc,nome_produto.asc`);
 
       if (!itens.length) {
         alert(lab ? `Nenhum item pendente para o laboratório "${lab.nome}".` : "Nenhum item pendente ou em andamento encontrado.");
@@ -708,9 +756,12 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
       const dataStr = new Date().toLocaleDateString("pt-BR");
       const horaStr = new Date().toLocaleString("pt-BR");
 
-      const tituloPrincipal = lab
-        ? (farmSel ? `Pedido ${lab.nome} — Farmácia ${farmSel.nome}` : `Pedido ${lab.nome} — Todas as Farmácias`)
-        : (farmSel ? `Pedidos — Farmácia ${farmSel.nome}` : `Pedidos — Todas as Farmácias e Laboratórios`);
+      const secaoNome = secaoPDF ? categoriaLabel[secaoPDF] || secaoPDF : "";
+      const tituloPrincipal = [
+        lab ? `Pedido ${lab.nome}` : "Pedidos",
+        farmSel ? `Farmácia ${farmSel.nome}` : "Todas as Farmácias",
+        secaoNome ? `Seção ${secaoNome}` : null,
+      ].filter(Boolean).join(" — ");
 
       const linhaItem = (item, i) => {
         const pedido = pedidos.find(p => p.id === item.pedido_id);
@@ -843,39 +894,55 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
               <option value="critico">Crítico</option>
             </select>
           </div>
-          <Btn onClick={() => { setFiltroFarmacia(""); setFiltroStatus(""); setFiltroUrgencia(""); }} outline cor={C.cinzaT} small>Limpar</Btn>
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>SEÇÃO</label>
+            <select value={filtroSecao} onChange={e => setFiltroSecao(e.target.value)} style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 13, fontFamily: "inherit", background: C.branco }}>
+              <option value="">Todas</option>
+              {categoriaOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <Btn onClick={() => { setFiltroFarmacia(""); setFiltroStatus(""); setFiltroUrgencia(""); setFiltroSecao(""); }} outline cor={C.cinzaT} small>Limpar</Btn>
         </div>
       </Card>
 
-      {/* Lista */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {pedidosFiltrados.length === 0 ? (
-          <Card><p style={{ color: C.cinzaT, textAlign: "center", margin: 0 }}>Nenhum pedido encontrado.</p></Card>
-        ) : pedidosFiltrados.map(p => {
-          const farm = farmacias.find(f => f.id === p.farmacia_id);
-          return (
-            <Card key={p.id} style={{ padding: 16, cursor: "pointer", transition: "box-shadow 0.15s" }} onClick={() => abrirPedido(p)}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                  <div style={{ width: 44, height: 44, background: urgenciaCor[p.urgencia] + "20", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <Icon name="pedidos" size={20} color={urgenciaCor[p.urgencia]} />
+      {/* Lista agrupada por período */}
+      {pedidosFiltrados.length === 0 ? (
+        <Card><p style={{ color: C.cinzaT, textAlign: "center", margin: 0 }}>Nenhum pedido encontrado.</p></Card>
+      ) : gruposPeriodo.filter(g => g.pedidos.length).map(grupo => (
+        <div key={grupo.titulo} style={{ marginBottom: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 800, color: C.azul, letterSpacing: 0.3, textTransform: "uppercase" }}>{grupo.titulo}</h3>
+            <span style={{ background: C.azul + "15", color: C.azul, borderRadius: 20, padding: "1px 10px", fontSize: 11, fontWeight: 700 }}>{grupo.pedidos.length}</span>
+            <div style={{ flex: 1, height: 1, background: C.cinzaE }} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {grupo.pedidos.map(p => {
+              const farm = farmacias.find(f => f.id === p.farmacia_id);
+              return (
+                <Card key={p.id} style={{ padding: 16, cursor: "pointer", transition: "box-shadow 0.15s" }} onClick={() => abrirPedido(p)}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                      <div style={{ width: 44, height: 44, background: urgenciaCor[p.urgencia] + "20", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <Icon name="pedidos" size={20} color={urgenciaCor[p.urgencia]} />
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: C.preto }}>{farm?.nome || "Farmácia"}</div>
+                        <div style={{ fontSize: 12, color: C.cinzaT }}>{new Date(p.criado_em).toLocaleString("pt-BR")}</div>
+                        {p.observacao && <div style={{ fontSize: 12, color: C.cinzaP, marginTop: 2 }}>{p.observacao.slice(0, 60)}</div>}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
+                      <Badge label={statusLabel[p.status]} cor={statusCor[p.status]} />
+                      <BtnIcon icon="olho" cor={C.azulClaro} title="Visualizar pedido" onClick={e => { e.stopPropagation(); abrirPedido(p); }} />
+                    </div>
                   </div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 15, color: C.preto }}>{farm?.nome || "Farmácia"}</div>
-                    <div style={{ fontSize: 12, color: C.cinzaT }}>{new Date(p.criado_em).toLocaleString("pt-BR")}</div>
-                    {p.observacao && <div style={{ fontSize: 12, color: C.cinzaP, marginTop: 2 }}>{p.observacao.slice(0, 60)}</div>}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
-                  <Badge label={statusLabel[p.status]} cor={statusCor[p.status]} />
-                  <BtnIcon icon="olho" cor={C.azulClaro} title="Visualizar pedido" onClick={e => { e.stopPropagation(); abrirPedido(p); }} />
-                </div>
-              </div>
-            </Card>
-          );
-        })}
-      </div>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      ))}
 
       {/* Modal Pedido */}
       {pedidoSelecionado && (
@@ -896,6 +963,33 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
               📝 {pedidoSelecionado.observacao}
             </div>
           )}
+
+          <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>ATUALIZAR STATUS</h4>
+          <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+            {["pendente", "em_andamento", "entregue"].map(s => (
+              <Btn key={s} onClick={() => atualizarStatus(s)} cor={statusCor[s]} small outline={pedidoSelecionado.status !== s}>
+                {statusLabel[s]}
+              </Btn>
+            ))}
+          </div>
+
+          <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>COMENTÁRIOS</h4>
+          <div style={{ background: C.cinzaF, borderRadius: 12, padding: 12, marginBottom: 12, maxHeight: 200, overflowY: "auto" }}>
+            {comentarios.length === 0 ? <p style={{ color: C.cinzaT, fontSize: 13, margin: 0 }}>Nenhum comentário ainda.</p> :
+              comentarios.map(c => (
+                <div key={c.id} style={{ marginBottom: 10, display: "flex", flexDirection: c.autor === "dono" ? "row-reverse" : "row", gap: 8 }}>
+                  <div style={{ background: c.autor === "dono" ? C.azul : C.branco, color: c.autor === "dono" ? C.branco : C.preto, padding: "8px 12px", borderRadius: 12, fontSize: 13, maxWidth: "80%", border: `1px solid ${C.cinzaE}` }}>
+                    <div style={{ fontSize: 10, opacity: 0.7, marginBottom: 4 }}>{c.autor === "dono" ? "Você" : "Farmácia"} • {new Date(c.criado_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</div>
+                    {c.mensagem}
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
+            <input value={novoComentario} onChange={e => setNovoComentario(e.target.value)} placeholder="Escreva uma mensagem..." onKeyDown={e => e.key === "Enter" && enviarComentario()} style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, fontFamily: "inherit", outline: "none" }} />
+            <Btn onClick={enviarComentario} cor={C.azul}><Icon name="msg" size={16} color={C.branco} /></Btn>
+          </div>
 
           <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>ITENS DO PEDIDO</h4>
           <div style={{ background: C.cinzaF, borderRadius: 12, overflow: "hidden", marginBottom: 20 }}>
@@ -922,45 +1016,17 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
             ))}
           </div>
 
-          <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>ATUALIZAR STATUS</h4>
-          <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-            {["pendente", "em_andamento", "entregue"].map(s => (
-              <Btn key={s} onClick={() => atualizarStatus(s)} cor={statusCor[s]} small outline={pedidoSelecionado.status !== s}>
-                {statusLabel[s]}
-              </Btn>
-            ))}
-          </div>
-          <div style={{ marginBottom: 20 }}>
-            <Btn onClick={excluirPedido} cor={C.vermelho} small>
-              <Icon name="lixeira" size={15} color={C.branco} /> Excluir Pedido
-            </Btn>
-          </div>
-
-          <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>COMENTÁRIOS</h4>
-          <div style={{ background: C.cinzaF, borderRadius: 12, padding: 12, marginBottom: 12, maxHeight: 200, overflowY: "auto" }}>
-            {comentarios.length === 0 ? <p style={{ color: C.cinzaT, fontSize: 13, margin: 0 }}>Nenhum comentário ainda.</p> :
-              comentarios.map(c => (
-                <div key={c.id} style={{ marginBottom: 10, display: "flex", flexDirection: c.autor === "dono" ? "row-reverse" : "row", gap: 8 }}>
-                  <div style={{ background: c.autor === "dono" ? C.azul : C.branco, color: c.autor === "dono" ? C.branco : C.preto, padding: "8px 12px", borderRadius: 12, fontSize: 13, maxWidth: "80%", border: `1px solid ${C.cinzaE}` }}>
-                    <div style={{ fontSize: 10, opacity: 0.7, marginBottom: 4 }}>{c.autor === "dono" ? "Você" : "Farmácia"} • {new Date(c.criado_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</div>
-                    {c.mensagem}
-                  </div>
-                </div>
-              ))
-            }
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input value={novoComentario} onChange={e => setNovoComentario(e.target.value)} placeholder="Escreva uma mensagem..." onKeyDown={e => e.key === "Enter" && enviarComentario()} style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, fontFamily: "inherit", outline: "none" }} />
-            <Btn onClick={enviarComentario} cor={C.azul}><Icon name="msg" size={16} color={C.branco} /></Btn>
-          </div>
+          <Btn onClick={excluirPedido} cor={C.vermelho} small>
+            <Icon name="lixeira" size={15} color={C.branco} /> Excluir Pedido
+          </Btn>
         </Modal>
       )}
 
       {/* Modal PDF */}
       {geraPDF && (
-        <Modal title="Gerar PDF de Pedidos" onClose={() => { setGeraPDF(false); setFarmPDF(""); setLabPDF(""); }} width={440}>
+        <Modal title="Gerar PDF de Pedidos" onClose={() => { setGeraPDF(false); setFarmPDF(""); setLabPDF(""); setSecaoPDF(""); }} width={440}>
           <p style={{ color: C.cinzaT, fontSize: 14, marginBottom: 20 }}>
-            Filtre por laboratório e/ou farmácia, se desejar. Sem filtros, o PDF traz todos os pedidos de todas as farmácias, separados por laboratório (um laboratório por página).
+            Filtre por laboratório, farmácia e/ou seção, se desejar. Sem filtros, o PDF traz todos os pedidos de todas as farmácias, separados por laboratório (um laboratório por página).
           </p>
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Laboratório (opcional)</label>
@@ -976,11 +1042,18 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
               {farmacias.filter(f => f.usuario !== "admin" && f.ativa !== false).map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
             </select>
           </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Seção (opcional)</label>
+            <select value={secaoPDF} onChange={e => setSecaoPDF(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}>
+              <option value="">Todas as seções</option>
+              {categoriaOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
             <Btn onClick={gerarPDFLab} cor={C.vermelho} disabled={loadingPDF} full>
               <Icon name="pdf" size={16} color={C.branco} /> {loadingPDF ? "Gerando..." : "Gerar e Imprimir PDF"}
             </Btn>
-            <Btn onClick={() => { setGeraPDF(false); setFarmPDF(""); setLabPDF(""); }} outline cor={C.cinzaT}>Cancelar</Btn>
+            <Btn onClick={() => { setGeraPDF(false); setFarmPDF(""); setLabPDF(""); setSecaoPDF(""); }} outline cor={C.cinzaT}>Cancelar</Btn>
           </div>
         </Modal>
       )}
@@ -1004,7 +1077,7 @@ const Deposito = ({ pedidos, farmacias, onAtualizar }) => {
   const [loadingItens, setLoadingItens] = useState(false);
   const [salvando, setSalvando] = useState(false);
 
-  const pedidosDeposito = pedidos.filter(p => p.status === "pendente" || p.status === "em_andamento");
+  const pedidosDeposito = pedidos.filter(p => p.liberado_deposito === false);
 
   useEffect(() => {
     const carregarContagens = async () => {
@@ -1039,7 +1112,8 @@ const Deposito = ({ pedidos, farmacias, onAtualizar }) => {
       if (idsParaRemover.length) {
         await sb(`pedido_itens?id=in.(${idsParaRemover.join(",")})`, { method: "DELETE", prefer: "return=minimal" });
       }
-      await sb(`pedidos?id=eq.${pedidoSelecionado.id}`, { method: "PATCH", prefer: "return=minimal", body: JSON.stringify({ status: "revisado" }) });
+      await sb(`pedidos?id=eq.${pedidoSelecionado.id}`, { method: "PATCH", prefer: "return=minimal", body: JSON.stringify({ liberado_deposito: true, liberado_deposito_em: new Date().toISOString() }) });
+      await sb(`logs`, { method: "POST", body: JSON.stringify({ pedido_id: pedidoSelecionado.id, farmacia_id: pedidoSelecionado.farmacia_id, acao: "Pedido liberado pelo Depósito" }) });
       setPedidoSelecionado(null);
       onAtualizar();
     } catch (e) { alert("Erro ao concluir revisão: " + e.message); }
@@ -1381,6 +1455,12 @@ const GerenciarLaboratorios = ({ laboratorios, onAtualizar }) => {
   const [contato, setContato] = useState("");
   const [loading, setLoading] = useState(false);
   const [confirmExcluir, setConfirmExcluir] = useState(null);
+  const [busca, setBusca] = useState("");
+
+  const buscaNormalizada = busca.trim().toLowerCase();
+  const laboratoriosFiltrados = buscaNormalizada
+    ? laboratorios.filter(lab => (lab.nome || "").toLowerCase().includes(buscaNormalizada))
+    : laboratorios;
 
   const abrirNovo = () => {
     setLabSelecionado(null);
@@ -1423,23 +1503,39 @@ const GerenciarLaboratorios = ({ laboratorios, onAtualizar }) => {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
         <div>
           <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Laboratórios</h2>
-          <p style={{ margin: 0, color: C.cinzaT, fontSize: 14 }}>{laboratorios.length} laboratórios cadastrados</p>
+          <p style={{ margin: 0, color: C.cinzaT, fontSize: 14 }}>
+            {buscaNormalizada ? `${laboratoriosFiltrados.length} de ${laboratorios.length} laboratórios` : `${laboratorios.length} laboratórios cadastrados`}
+          </p>
         </div>
         <Btn onClick={abrirNovo} cor={C.azul}>
           <Icon name="mais" size={16} color={C.branco} /> Novo Laboratório
         </Btn>
       </div>
 
-      {laboratorios.length === 0 ? (
+      <div style={{ position: "relative", maxWidth: 360, marginBottom: 20 }}>
+        <div style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display: "flex", pointerEvents: "none" }}>
+          <Icon name="lupa" size={16} color={C.cinzaT} />
+        </div>
+        <input
+          value={busca}
+          onChange={e => setBusca(e.target.value)}
+          placeholder="Buscar laboratório..."
+          style={{ width: "100%", padding: "10px 14px 10px 38px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}
+        />
+      </div>
+
+      {laboratoriosFiltrados.length === 0 ? (
         <Card>
-          <p style={{ color: C.cinzaT, textAlign: "center", margin: 0 }}>Nenhum laboratório cadastrado ainda.</p>
+          <p style={{ color: C.cinzaT, textAlign: "center", margin: 0 }}>
+            {buscaNormalizada ? "Nenhum laboratório encontrado para esta busca." : "Nenhum laboratório cadastrado ainda."}
+          </p>
         </Card>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
-          {laboratorios.map(lab => (
+          {laboratoriosFiltrados.map(lab => (
             <Card key={lab.id} style={{ display: "flex", flexDirection: "column" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
                 <div style={{ width: 44, height: 44, background: C.azulClaro + "15", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -1498,21 +1594,151 @@ const GerenciarLaboratorios = ({ laboratorios, onAtualizar }) => {
 // NOVA SOLICITAÇÃO (farmácia)
 // =============================================
 const itemVazio = { nome: "", categoria: "eticos", laboratorio_id: "", quantidade: 1, motivo: "esgotou" };
+const gerarIdRascunho = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+const novoRascunho = (itens) => ({ id: gerarIdRascunho(), urgencia: "normal", observacao: "", itens: itens && itens.length ? itens : [{ ...itemVazio }] });
 
-const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo, itensIniciais, onConsumirItensIniciais }) => {
-  const rascunhoKey = `hiperafarma_rascunho_${farmaciaId}`;
-  const temItensIniciais = !!(itensIniciais && itensIniciais.length);
-  const rascunhoSalvo = (() => {
-    if (temItensIniciais) return null;
+// =============================================
+// ABAS DE SOLICITAÇÃO (farmácia) — várias solicitações independentes em paralelo
+// =============================================
+const SolicitacoesTabs = ({ farmaciaId, laboratorios, onSalvo, itensIniciais, onConsumirItensIniciais }) => {
+  const chaveAbas = `hiperafarma_solicitacoes_${farmaciaId}`;
+  const chaveAntiga = `hiperafarma_rascunho_${farmaciaId}`;
+
+  const [estado, setEstado] = useState(() => {
     try {
-      const salvo = localStorage.getItem(rascunhoKey);
-      return salvo ? JSON.parse(salvo) : null;
-    } catch { return null; }
-  })();
+      const salvo = localStorage.getItem(chaveAbas);
+      if (salvo) {
+        const parsed = JSON.parse(salvo);
+        if (parsed?.drafts?.length) return parsed;
+      }
+    } catch {}
+    try {
+      const antigo = localStorage.getItem(chaveAntiga);
+      if (antigo) {
+        const d = JSON.parse(antigo);
+        const draft = { ...novoRascunho(d.itens), urgencia: d.urgencia || "normal", observacao: d.observacao || "" };
+        localStorage.removeItem(chaveAntiga);
+        return { abaAtivaId: draft.id, drafts: [draft] };
+      }
+    } catch {}
+    const draft = novoRascunho();
+    return { abaAtivaId: draft.id, drafts: [draft] };
+  });
+  const { drafts, abaAtivaId } = estado;
 
-  const [urgencia, setUrgencia] = useState(rascunhoSalvo?.urgencia || "normal");
-  const [observacao, setObservacao] = useState(rascunhoSalvo?.observacao || "");
-  const [itens, setItens] = useState(temItensIniciais ? itensIniciais : (rascunhoSalvo?.itens || [{ ...itemVazio }]));
+  useEffect(() => {
+    localStorage.setItem(chaveAbas, JSON.stringify(estado));
+  }, [estado, chaveAbas]);
+
+  // Garante que sempre exista uma aba ativa válida (ex: após fechar/enviar uma solicitação)
+  useEffect(() => {
+    if (!drafts.length) {
+      const d = novoRascunho();
+      setEstado({ abaAtivaId: d.id, drafts: [d] });
+    } else if (!drafts.find(d => d.id === abaAtivaId)) {
+      setEstado(e => ({ ...e, abaAtivaId: drafts[0].id }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drafts, abaAtivaId]);
+
+  useEffect(() => {
+    if (itensIniciais && itensIniciais.length) {
+      const d = novoRascunho(itensIniciais);
+      setEstado(e => ({ abaAtivaId: d.id, drafts: [...e.drafts, d] }));
+      onConsumirItensIniciais?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itensIniciais]);
+
+  const abrirAba = (id) => setEstado(e => ({ ...e, abaAtivaId: id }));
+
+  const novaAba = () => {
+    const d = novoRascunho();
+    setEstado(e => ({ abaAtivaId: d.id, drafts: [...e.drafts, d] }));
+  };
+
+  const fecharAba = (id, e) => {
+    e?.stopPropagation();
+    if (drafts.length <= 1) {
+      if (!window.confirm("Limpar esta solicitação?")) return;
+      setEstado({ abaAtivaId: null, drafts: [] });
+      return;
+    }
+    if (!window.confirm("Fechar esta solicitação? Os itens preenchidos nela serão perdidos.")) return;
+    setEstado(prev => ({ ...prev, drafts: prev.drafts.filter(d => d.id !== id) }));
+  };
+
+  const atualizarDraft = (id, patch) => {
+    setEstado(e => ({ ...e, drafts: e.drafts.map(d => d.id === id ? { ...d, ...patch } : d) }));
+  };
+
+  const aoEnviar = (id) => {
+    setEstado(e => ({ ...e, drafts: e.drafts.filter(d => d.id !== id) }));
+  };
+
+  const abaAtiva = drafts.find(d => d.id === abaAtivaId);
+
+  return (
+    <div>
+      <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Nova Solicitação</h2>
+      <p style={{ margin: "0 0 20px", color: C.cinzaT, fontSize: 14 }}>Adicione os itens que estão faltando — você pode preencher várias solicitações ao mesmo tempo</p>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20, overflowX: "auto", paddingBottom: 4 }}>
+        {drafts.map((d, i) => (
+          <div
+            key={d.id}
+            onClick={() => abrirAba(d.id)}
+            style={{
+              display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flexShrink: 0,
+              padding: "9px 14px", borderRadius: 10,
+              background: d.id === abaAtivaId ? C.azul : C.branco,
+              color: d.id === abaAtivaId ? C.branco : C.cinzaP,
+              border: `1.5px solid ${d.id === abaAtivaId ? C.azul : C.cinzaD}`,
+              fontWeight: 700, fontSize: 13, whiteSpace: "nowrap",
+            }}
+          >
+            Solicitação {i + 1}
+            {d.itens.some(it => it.nome) && (
+              <span style={{ background: d.id === abaAtivaId ? "rgba(255,255,255,0.25)" : C.cinzaE, color: d.id === abaAtivaId ? C.branco : C.cinzaT, borderRadius: 20, padding: "1px 7px", fontSize: 11 }}>
+                {d.itens.filter(it => it.nome).length}
+              </span>
+            )}
+            {drafts.length > 1 && (
+              <button onClick={e => fecharAba(d.id, e)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: 0, color: "inherit", opacity: 0.75 }}>
+                <Icon name="fechar" size={13} color={d.id === abaAtivaId ? C.branco : C.cinzaT} />
+              </button>
+            )}
+          </div>
+        ))}
+        <button onClick={novaAba} style={{
+          display: "flex", alignItems: "center", gap: 6, flexShrink: 0, cursor: "pointer",
+          padding: "9px 14px", borderRadius: 10, background: "transparent", color: C.azul,
+          border: `1.5px dashed ${C.azulClaro}`, fontWeight: 700, fontSize: 13, whiteSpace: "nowrap", fontFamily: "inherit",
+        }}>
+          <Icon name="mais" size={14} color={C.azul} /> Nova solicitação
+        </button>
+      </div>
+
+      {abaAtiva && (
+        <NovaSolicitacaoForm
+          key={abaAtiva.id}
+          draft={abaAtiva}
+          onChange={patch => atualizarDraft(abaAtiva.id, patch)}
+          farmaciaId={farmaciaId}
+          laboratorios={laboratorios}
+          onEnviado={() => { aoEnviar(abaAtiva.id); onSalvo(); }}
+        />
+      )}
+    </div>
+  );
+};
+
+const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnviado }) => {
+  const { urgencia, observacao, itens } = draft;
+  const setUrgencia = v => onChange({ urgencia: v });
+  const setObservacao = v => onChange({ observacao: v });
+  const setItens = novos => onChange({ itens: novos });
+
   const [sugestoes, setSugestoes] = useState([]);
   const [indexAtivo, setIndexAtivo] = useState(null);
   const [labSearch, setLabSearch] = useState({});
@@ -1520,25 +1746,10 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo, itensIniciais, onC
   const [labDirection, setLabDirection] = useState({});
   const labRefs = useRef({});
   const [loading, setLoading] = useState(false);
-  const pularProximoSave = useRef(false);
-
-  useEffect(() => {
-    if (temItensIniciais) onConsumirItensIniciais?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (pularProximoSave.current) { pularProximoSave.current = false; return; }
-    localStorage.setItem(rascunhoKey, JSON.stringify({ urgencia, observacao, itens }));
-  }, [urgencia, observacao, itens, rascunhoKey]);
 
   const limparRascunho = () => {
-    if (!window.confirm("Descartar o rascunho e limpar o formulário?")) return;
-    pularProximoSave.current = true;
-    localStorage.removeItem(rascunhoKey);
-    setUrgencia("normal");
-    setObservacao("");
-    setItens([{ ...itemVazio }]);
+    if (!window.confirm("Limpar os itens preenchidos nesta solicitação?")) return;
+    onChange({ urgencia: "normal", observacao: "", itens: [{ ...itemVazio }] });
   };
 
   const buscarSugestoes = async (texto, index) => {
@@ -1550,8 +1761,7 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo, itensIniciais, onC
 
   const selecionarSugestao = (produto, index) => {
     const novos = [...itens];
-    novos[index].nome = produto.nome;
-    novos[index].categoria = produto.categoria;
+    novos[index] = { ...novos[index], nome: produto.nome, categoria: produto.categoria };
     if (produto.laboratorio_id) novos[index].laboratorio_id = produto.laboratorio_id;
     setItens(novos);
     setSugestoes([]);
@@ -1560,7 +1770,7 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo, itensIniciais, onC
 
   const addItem = () => setItens([...itens, { nome: "", categoria: "eticos", laboratorio_id: "", quantidade: 1, motivo: "esgotou" }]);
   const remItem = (i) => setItens(itens.filter((_, idx) => idx !== i));
-  const editItem = (i, campo, val) => { const n = [...itens]; n[i][campo] = val; setItens(n); };
+  const editItem = (i, campo, val) => { const n = itens.map((it, idx) => idx === i ? { ...it, [campo]: val } : it); setItens(n); };
 
   const salvar = async () => {
     if (itens.some(i => !i.nome)) { alert("Preencha o nome de todos os itens."); return; }
@@ -1581,17 +1791,13 @@ const NovaSolicitacao = ({ farmaciaId, laboratorios, onSalvo, itensIniciais, onC
       }
 
       await sb("logs", { method: "POST", body: JSON.stringify({ farmacia_id: farmaciaId, pedido_id: pedidoId, acao: "Pedido criado", detalhes: `${itens.length} itens` }) });
-      localStorage.removeItem(rascunhoKey);
-      onSalvo();
+      onEnviado();
     } catch (e) { alert("Erro ao salvar: " + e.message); }
     setLoading(false);
   };
 
   return (
     <div>
-      <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Nova Solicitação</h2>
-      <p style={{ margin: "0 0 28px", color: C.cinzaT, fontSize: 14 }}>Adicione os itens que estão faltando</p>
-
       <Card style={{ marginBottom: 20 }}>
         <Select label="Urgência do Pedido" value={urgencia} onChange={setUrgencia} options={[{ value: "normal", label: "Normal" }, { value: "urgente", label: "Urgente" }, { value: "critico", label: "Crítico" }]} />
         <div>
@@ -1739,10 +1945,14 @@ const MeusPedidos = ({ farmaciaId, onRepetir }) => {
   };
 
   const confirmarRecebimento = async () => {
-    await sb(`pedidos?id=eq.${pedidoSel.id}`, { method: "PATCH", prefer: "return=minimal", body: JSON.stringify({ status: "entregue" }) });
-    setPedidoSel({ ...pedidoSel, status: "entregue" });
-    setPedidos(pedidos.map(p => p.id === pedidoSel.id ? { ...p, status: "entregue" } : p));
+    const entregueEm = new Date().toISOString();
+    await sb(`pedidos?id=eq.${pedidoSel.id}`, { method: "PATCH", prefer: "return=minimal", body: JSON.stringify({ status: "entregue", entregue_em: entregueEm }) });
+    setPedidoSel({ ...pedidoSel, status: "entregue", entregue_em: entregueEm });
+    setPedidos(pedidos.map(p => p.id === pedidoSel.id ? { ...p, status: "entregue", entregue_em: entregueEm } : p));
   };
+
+  const QUINZE_DIAS_MS = 15 * 24 * 60 * 60 * 1000;
+  const podeRepetir = (p) => p.status === "entregue" && p.entregue_em && (Date.now() - new Date(p.entregue_em).getTime()) <= QUINZE_DIAS_MS;
 
   const repetirPedido = async (p, e) => {
     e.stopPropagation();
@@ -1787,15 +1997,18 @@ const MeusPedidos = ({ farmaciaId, onRepetir }) => {
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
+                  {p.liberado_deposito === false && <Badge label="Em conferência no Depósito" cor={C.laranja} />}
                   <Badge label={statusLabel[p.status]} cor={statusCor[p.status]} />
                   <BtnIcon icon="olho" cor={C.azulClaro} title="Ver pedido" onClick={e => { e.stopPropagation(); abrirPedido(p); }} />
                 </div>
               </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.cinzaE}` }}>
-                <Btn onClick={e => repetirPedido(p, e)} outline cor={C.azul} small disabled={repetindo === p.id}>
-                  <Icon name="repetir" size={14} color={C.azul} /> {repetindo === p.id ? "Carregando..." : "Repetir Pedido"}
-                </Btn>
-              </div>
+              {podeRepetir(p) && (
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.cinzaE}` }}>
+                  <Btn onClick={e => repetirPedido(p, e)} outline cor={C.azul} small disabled={repetindo === p.id}>
+                    <Icon name="repetir" size={14} color={C.azul} /> {repetindo === p.id ? "Carregando..." : "Repetir Pedido"}
+                  </Btn>
+                </div>
+              )}
             </Card>
           ))
         }
@@ -1803,10 +2016,36 @@ const MeusPedidos = ({ farmaciaId, onRepetir }) => {
 
       {pedidoSel && (
         <Modal title={`Pedido #${pedidoSel.id.slice(0, 8).toUpperCase()}`} onClose={() => setPedidoSel(null)} width={600}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
             <Badge label={urgenciaLabel[pedidoSel.urgencia]} cor={urgenciaCor[pedidoSel.urgencia]} />
+            {pedidoSel.liberado_deposito === false && <Badge label="Em conferência no Depósito" cor={C.laranja} />}
             <Badge label={statusLabel[pedidoSel.status]} cor={statusCor[pedidoSel.status]} />
           </div>
+
+          {pedidoSel.status !== "entregue" && (
+            <div style={{ marginBottom: 20 }}>
+              <Btn onClick={confirmarRecebimento} cor={C.verde} full><Icon name="check" size={16} color={C.branco} /> Confirmar Recebimento</Btn>
+            </div>
+          )}
+
+          <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>COMENTÁRIOS</h4>
+          <div style={{ background: C.cinzaF, borderRadius: 12, padding: 12, marginBottom: 12, maxHeight: 180, overflowY: "auto" }}>
+            {comentarios.length === 0 ? <p style={{ color: C.cinzaT, fontSize: 13, margin: 0 }}>Nenhum comentário.</p> :
+              comentarios.map(c => (
+                <div key={c.id} style={{ marginBottom: 8, display: "flex", flexDirection: c.autor === "farmacia" ? "row-reverse" : "row", gap: 8 }}>
+                  <div style={{ background: c.autor === "farmacia" ? C.azul : C.branco, color: c.autor === "farmacia" ? C.branco : C.preto, padding: "8px 12px", borderRadius: 12, fontSize: 13, border: `1px solid ${C.cinzaE}` }}>
+                    <div style={{ fontSize: 10, opacity: 0.7, marginBottom: 4 }}>{c.autor === "farmacia" ? "Você" : "Dono"}</div>
+                    {c.mensagem}
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
+            <input value={novoComentario} onChange={e => setNovoComentario(e.target.value)} placeholder="Responder..." onKeyDown={e => e.key === "Enter" && enviarComentario()} style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, fontFamily: "inherit", outline: "none" }} />
+            <Btn onClick={enviarComentario} cor={C.azul}><Icon name="msg" size={16} /></Btn>
+          </div>
+
           <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>ITENS DO PEDIDO</h4>
           <div style={{ background: C.cinzaF, borderRadius: 12, overflow: "hidden", marginBottom: 16 }}>
             {loadingItens ? (
@@ -1829,30 +2068,6 @@ const MeusPedidos = ({ farmaciaId, onRepetir }) => {
                 </div>
               </div>
             ))}
-          </div>
-
-          {pedidoSel.status !== "entregue" && (
-            <div style={{ marginBottom: 16 }}>
-              <Btn onClick={confirmarRecebimento} cor={C.verde} full><Icon name="check" size={16} color={C.branco} /> Confirmar Recebimento</Btn>
-            </div>
-          )}
-
-          <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: C.cinzaT }}>COMENTÁRIOS</h4>
-          <div style={{ background: C.cinzaF, borderRadius: 12, padding: 12, marginBottom: 12, maxHeight: 180, overflowY: "auto" }}>
-            {comentarios.length === 0 ? <p style={{ color: C.cinzaT, fontSize: 13, margin: 0 }}>Nenhum comentário.</p> :
-              comentarios.map(c => (
-                <div key={c.id} style={{ marginBottom: 8, display: "flex", flexDirection: c.autor === "farmacia" ? "row-reverse" : "row", gap: 8 }}>
-                  <div style={{ background: c.autor === "farmacia" ? C.azul : C.branco, color: c.autor === "farmacia" ? C.branco : C.preto, padding: "8px 12px", borderRadius: 12, fontSize: 13, border: `1px solid ${C.cinzaE}` }}>
-                    <div style={{ fontSize: 10, opacity: 0.7, marginBottom: 4 }}>{c.autor === "farmacia" ? "Você" : "Dono"}</div>
-                    {c.mensagem}
-                  </div>
-                </div>
-              ))
-            }
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input value={novoComentario} onChange={e => setNovoComentario(e.target.value)} placeholder="Responder..." onKeyDown={e => e.key === "Enter" && enviarComentario()} style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, fontFamily: "inherit", outline: "none" }} />
-            <Btn onClick={enviarComentario} cor={C.azul}><Icon name="msg" size={16} /></Btn>
           </div>
         </Modal>
       )}
@@ -1928,65 +2143,244 @@ const ManutencaoFarmacia = ({ farmaciaId }) => {
 // =============================================
 // PREVISÃO SIMPLES
 // =============================================
-const Previsao = ({ farmaciaId, isDono, farmacias }) => {
+// Mediana simples — usada para reduzir a distorção de pedidos muito fora do padrão.
+const mediana = (valores) => {
+  const s = [...valores].sort((a, b) => a - b);
+  const meio = Math.floor(s.length / 2);
+  return s.length % 2 ? s[meio] : (s[meio - 1] + s[meio]) / 2;
+};
+
+// Calcula a previsão de pedido a partir do histórico real de pedido_itens de uma farmácia.
+// Não gera nenhum número aleatório: tudo vem de quantidades e datas já registradas no sistema.
+const calcularPrevisao = (itens) => {
+  const grupos = {};
+  itens.forEach(item => {
+    const chave = item.nome_produto;
+    if (!grupos[chave]) grupos[chave] = [];
+    grupos[chave].push(item);
+  });
+
+  const resultado = Object.entries(grupos).map(([nome, ocorrencias]) => {
+    const ordenadas = [...ocorrencias].sort((a, b) => new Date(b.criado_em) - new Date(a.criado_em));
+    const maisRecente = ordenadas[0];
+    const maisAntiga = ordenadas[ordenadas.length - 1];
+    const numOcorrencias = ordenadas.length;
+
+    const intervaloMedioDias = numOcorrencias >= 2
+      ? (new Date(maisRecente.criado_em) - new Date(maisAntiga.criado_em)) / (numOcorrencias - 1) / 86400000
+      : null;
+    const diasDesdeUltimoPedido = (Date.now() - new Date(maisRecente.criado_em).getTime()) / 86400000;
+    // > 1 = já passou do intervalo médio esperado entre pedidos (provável repedido)
+    const urgenciaRepedido = intervaloMedioDias ? diasDesdeUltimoPedido / intervaloMedioDias : null;
+
+    // Mediana das últimas até 6 quantidades pedidas: robusta a pedidos muito fora do padrão.
+    const ultimasQtds = ordenadas.slice(0, 6).map(o => o.quantidade);
+    const previsaoQuantidade = Math.round(mediana(ultimasQtds));
+
+    return {
+      nome,
+      categoria: maisRecente.categoria,
+      laboratorioId: maisRecente.laboratorio_id,
+      laboratorioNome: maisRecente.nome_laboratorio,
+      numOcorrencias,
+      ultimaQuantidade: maisRecente.quantidade,
+      ultimaData: maisRecente.criado_em,
+      intervaloMedioDias,
+      diasDesdeUltimoPedido,
+      urgenciaRepedido,
+      previsaoQuantidade,
+    };
+  });
+
+  const comHistoricoRegular = resultado.filter(r => r.urgenciaRepedido != null).sort((a, b) => b.urgenciaRepedido - a.urgenciaRepedido);
+  const semHistoricoRegular = resultado.filter(r => r.urgenciaRepedido == null).sort((a, b) => new Date(b.ultimaData) - new Date(a.ultimaData));
+  return [...comHistoricoRegular, ...semHistoricoRegular];
+};
+
+const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
+  const [farmaciaSel, setFarmaciaSel] = useState(isDono ? "" : farmaciaId);
+  const [laboratorioSel, setLaboratorioSel] = useState("");
+  const [secaoSel, setSecaoSel] = useState("");
   const [dados, setDados] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [pdfHtml, setPdfHtml] = useState(null);
+
+  const farmaciaAtivaId = isDono ? farmaciaSel : farmaciaId;
+  const farmaciaAtiva = farmacias.find(f => f.id === farmaciaAtivaId);
+  const laboratorioAtivo = laboratorioSel ? laboratorios.find(l => l.id === laboratorioSel) : null;
 
   useEffect(() => {
+    if (!farmaciaAtivaId) { setDados([]); return; }
     const carregarPrevisao = async () => {
       setLoading(true);
       try {
-        let query = `pedido_itens?order=criado_em.desc&limit=200`;
-        if (!isDono && farmaciaId) {
-          const pedidos = await sb(`pedidos?farmacia_id=eq.${farmaciaId}&select=id`);
-          const ids = pedidos.map(p => p.id).join(",");
-          if (!ids) { setDados([]); setLoading(false); return; }
-          query = `pedido_itens?pedido_id=in.(${ids})&order=criado_em.desc`;
-        }
+        let query = `pedido_itens?select=nome_produto,categoria,laboratorio_id,nome_laboratorio,quantidade,criado_em,pedidos!inner(farmacia_id)&pedidos.farmacia_id=eq.${farmaciaAtivaId}&order=criado_em.desc&limit=3000`;
+        if (laboratorioSel) query += `&laboratorio_id=eq.${laboratorioSel}`;
+        if (secaoSel) query += `&categoria=eq.${secaoSel}`;
         const itens = await sb(query);
-        const contagem = {};
-        itens.forEach(item => {
-          const key = item.nome_produto;
-          contagem[key] = (contagem[key] || 0) + item.quantidade;
-        });
-        const ordenado = Object.entries(contagem).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([nome, total]) => ({ nome, total, previsao: Math.round(total * 1.1) }));
-        setDados(ordenado);
-      } catch {}
+        setDados(calcularPrevisao(itens));
+      } catch (e) {
+        console.error(e);
+        setDados([]);
+      }
       setLoading(false);
     };
     carregarPrevisao();
-  }, [farmaciaId, isDono]);
+  }, [farmaciaAtivaId, laboratorioSel, secaoSel]);
+
+  const gerarPDFPrevisao = () => {
+    if (!farmaciaAtiva || !dados.length) return;
+    const dataStr = new Date().toLocaleDateString("pt-BR");
+    const horaStr = new Date().toLocaleString("pt-BR");
+    const filtrosAplicados = [
+      laboratorioAtivo ? `Laboratório: ${laboratorioAtivo.nome}` : null,
+      secaoSel ? `Seção: ${categoriaLabel[secaoSel] || secaoSel}` : null,
+    ].filter(Boolean).join(" · ");
+
+    const linhas = dados.map((d, i) => `<tr>
+        <td>${i + 1}</td>
+        <td><strong>${escHtml(d.nome)}</strong></td>
+        <td>${escHtml(categoriaLabel[d.categoria] || d.categoria || "—")}</td>
+        <td>${escHtml(d.laboratorioNome || "—")}</td>
+        <td style="text-align:center">${d.numOcorrencias}</td>
+        <td style="text-align:center">${d.intervaloMedioDias ? Math.round(d.intervaloMedioDias) + "d" : "—"}</td>
+        <td style="text-align:center;font-weight:700;color:#1A3A8F">${d.previsaoQuantidade}</td>
+      </tr>`).join("");
+
+    const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Previsão de Pedido — ${escHtml(farmaciaAtiva.nome)} — ${dataStr}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; padding: 40px; color: #0F172A; font-size: 13px; }
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 3px solid #1A3A8F; }
+    .header img { width: 180px; height: auto; }
+    .header-right { text-align: right; }
+    .tag { display: inline-block; background: #F5A800; color: #1A3A8F; font-weight: 800; font-size: 11px; letter-spacing: 0.5px; padding: 4px 10px; border-radius: 20px; margin-bottom: 6px; }
+    .farm-name { font-size: 20px; font-weight: 800; color: #1A3A8F; margin-bottom: 4px; }
+    .date { color: #6B7A99; font-size: 12px; }
+    .aviso { background: #FFF7E6; border: 1px solid #F5A800; border-radius: 8px; padding: 10px 14px; margin-bottom: 20px; font-size: 12px; color: #7A5300; }
+    .filtros { color: #6B7A99; font-size: 12px; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { background: #1A3A8F; color: #FFFFFF; }
+    th { padding: 10px 14px; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
+    td { padding: 10px 14px; border-bottom: 1px solid #E8ECF4; }
+    tr:nth-child(even) td { background: #F4F6FA; }
+    tr { page-break-inside: avoid; break-inside: avoid; }
+    .footer { margin-top: 40px; font-size: 10px; color: #6B7A99; text-align: center; border-top: 1px solid #E8ECF4; padding-top: 16px; }
+    @media print { body { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="https://i.postimg.cc/pVwVTC9j/LOGO-VERTICALL-EM-PNG.png" alt="Hiperafarma" onerror="this.style.display='none'">
+    <div class="header-right">
+      <div class="tag">PREVISÃO DE PEDIDO</div>
+      <div class="farm-name">${escHtml(farmaciaAtiva.nome)}</div>
+      <div class="date">Gerado em: ${dataStr}</div>
+    </div>
+  </div>
+  <div class="aviso">⚠️ Este documento é uma <strong>previsão</strong> calculada a partir do histórico de pedidos da farmácia — não é um pedido confirmado.</div>
+  ${filtrosAplicados ? `<div class="filtros">Filtros aplicados: ${escHtml(filtrosAplicados)}</div>` : ""}
+  <table>
+    <thead><tr><th>#</th><th>Produto</th><th>Seção</th><th>Laboratório</th><th>Nº pedidos</th><th>Intervalo médio</th><th>Previsão (qtd)</th></tr></thead>
+    <tbody>${linhas}</tbody>
+  </table>
+  <div class="footer">Hiperafarma Drogarias — Gerado em ${horaStr} — Documento de uso interno, sujeito a revisão manual</div>
+  <script>window.onload = function() { window.print(); }</script>
+</body>
+</html>`;
+
+    setPdfHtml(html);
+  };
 
   return (
     <div>
-      <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Previsão de Demanda</h2>
-      <p style={{ margin: "0 0 28px", color: C.cinzaT, fontSize: 14 }}>Baseado no histórico de pedidos</p>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Previsão de Pedido</h2>
+          <p style={{ margin: 0, color: C.cinzaT, fontSize: 14 }}>Baseada no histórico real de solicitações da farmácia</p>
+        </div>
+        <Btn onClick={gerarPDFPrevisao} cor={C.vermelho} disabled={!farmaciaAtivaId || !dados.length}>
+          <Icon name="pdf" size={16} color={C.branco} /> Gerar PDF da Previsão
+        </Btn>
+      </div>
 
-      {loading ? <p style={{ color: C.cinzaT }}>Calculando previsão...</p> : (
-        <Card>
-          {dados.length === 0 ? <p style={{ color: C.cinzaT, textAlign: "center" }}>Histórico insuficiente para previsão. Continue usando o sistema!</p> :
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "8px 16px", alignItems: "center", marginBottom: 12, padding: "8px 0", borderBottom: `2px solid ${C.cinzaE}` }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: C.cinzaT }}>PRODUTO</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: C.cinzaT }}>HISTÓRICO</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: C.azul }}>PREVISÃO</span>
-              </div>
-              {dados.map((d, i) => (
-                <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "8px 16px", alignItems: "center", padding: "10px 0", borderBottom: `1px solid ${C.cinzaF}` }}>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 14, color: C.preto }}>{d.nome}</div>
-                    <div style={{ height: 4, background: C.cinzaE, borderRadius: 4, marginTop: 6 }}>
-                      <div style={{ height: 4, background: C.azul, borderRadius: 4, width: `${Math.min((d.total / dados[0].total) * 100, 100)}%` }} />
-                    </div>
-                  </div>
-                  <span style={{ fontWeight: 600, color: C.cinzaP, textAlign: "right" }}>{d.total} un.</span>
-                  <span style={{ fontWeight: 700, color: C.azul, textAlign: "right", background: C.azul + "15", padding: "4px 10px", borderRadius: 8 }}>~{d.previsao} un.</span>
-                </div>
-              ))}
-            </>
-          }
+      <Card style={{ marginBottom: 20, padding: 16 }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+          {isDono && (
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>FARMÁCIA</label>
+              <select value={farmaciaSel} onChange={e => setFarmaciaSel(e.target.value)} style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 13, fontFamily: "inherit", background: C.branco }}>
+                <option value="">Selecione uma farmácia...</option>
+                {farmacias.filter(f => f.usuario !== "admin" && f.ativa !== false).map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
+              </select>
+            </div>
+          )}
+          <div style={{ flex: 1, minWidth: 160 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>LABORATÓRIO</label>
+            <select value={laboratorioSel} onChange={e => setLaboratorioSel(e.target.value)} style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 13, fontFamily: "inherit", background: C.branco }}>
+              <option value="">Todos</option>
+              {laboratorios.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
+            </select>
+          </div>
+          <div style={{ flex: 1, minWidth: 160 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>SEÇÃO</label>
+            <select value={secaoSel} onChange={e => setSecaoSel(e.target.value)} style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 13, fontFamily: "inherit", background: C.branco }}>
+              <option value="">Todas</option>
+              {categoriaOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          {(laboratorioSel || secaoSel) && (
+            <Btn onClick={() => { setLaboratorioSel(""); setSecaoSel(""); }} outline cor={C.cinzaT} small>Limpar</Btn>
+          )}
+        </div>
+      </Card>
+
+      {!farmaciaAtivaId ? (
+        <Card><p style={{ color: C.cinzaT, textAlign: "center", margin: 0 }}>Selecione uma farmácia para calcular a previsão de pedido.</p></Card>
+      ) : loading ? (
+        <p style={{ color: C.cinzaT }}>Calculando previsão...</p>
+      ) : (
+        <Card style={{ padding: 0, overflow: "hidden" }}>
+          {dados.length === 0 ? (
+            <p style={{ color: C.cinzaT, textAlign: "center", padding: 24 }}>Histórico insuficiente para gerar previsão com os filtros atuais.</p>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
+                <thead>
+                  <tr style={{ background: C.cinzaF }}>
+                    <th style={{ textAlign: "left", padding: "10px 16px", fontSize: 11, fontWeight: 700, color: C.cinzaT, textTransform: "uppercase" }}>Produto</th>
+                    <th style={{ textAlign: "left", padding: "10px 16px", fontSize: 11, fontWeight: 700, color: C.cinzaT, textTransform: "uppercase" }}>Seção</th>
+                    <th style={{ textAlign: "left", padding: "10px 16px", fontSize: 11, fontWeight: 700, color: C.cinzaT, textTransform: "uppercase" }}>Laboratório</th>
+                    <th style={{ textAlign: "center", padding: "10px 16px", fontSize: 11, fontWeight: 700, color: C.cinzaT, textTransform: "uppercase" }}>Nº pedidos</th>
+                    <th style={{ textAlign: "center", padding: "10px 16px", fontSize: 11, fontWeight: 700, color: C.cinzaT, textTransform: "uppercase" }}>Intervalo médio</th>
+                    <th style={{ textAlign: "center", padding: "10px 16px", fontSize: 11, fontWeight: 700, color: C.azul, textTransform: "uppercase" }}>Previsão</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dados.map((d, i) => (
+                    <tr key={d.nome} style={{ borderBottom: `1px solid ${C.cinzaE}`, background: i % 2 ? C.cinzaF : C.branco }}>
+                      <td style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, color: C.preto }}>{d.nome}</td>
+                      <td style={{ padding: "10px 16px" }}><Badge label={categoriaLabel[d.categoria] || d.categoria || "—"} cor={categoriaCor[d.categoria] || C.cinzaT} /></td>
+                      <td style={{ padding: "10px 16px", fontSize: 13, color: C.cinzaP }}>{d.laboratorioNome || "—"}</td>
+                      <td style={{ padding: "10px 16px", textAlign: "center", fontSize: 13, color: C.cinzaP }}>{d.numOcorrencias}</td>
+                      <td style={{ padding: "10px 16px", textAlign: "center", fontSize: 13, color: C.cinzaP }}>{d.intervaloMedioDias ? `${Math.round(d.intervaloMedioDias)}d` : "—"}</td>
+                      <td style={{ padding: "10px 16px", textAlign: "center" }}>
+                        <span style={{ fontWeight: 700, color: C.azul, background: C.azul + "15", padding: "4px 12px", borderRadius: 8 }}>{d.previsaoQuantidade} un.</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Card>
       )}
+
+      {pdfHtml && <PdfViewerOverlay html={pdfHtml} onClose={() => setPdfHtml(null)} />}
     </div>
   );
 };
@@ -2165,7 +2559,7 @@ export default function App() {
         case "manutencoes": return <ManutencoesDono farmacias={farmacias} />;
         case "farmacias": return <GerenciarFarmacias farmacias={farmacias} onAtualizar={carregarDados} />;
         case "laboratorios": return <GerenciarLaboratorios laboratorios={laboratorios} onAtualizar={carregarDados} />;
-        case "previsao": return <Previsao isDono={true} farmacias={farmacias} />;
+        case "previsao": return <Previsao isDono={true} farmacias={farmacias} laboratorios={laboratorios} />;
         case "graficos": return (
           <div>
             <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Relatórios</h2>
@@ -2178,9 +2572,9 @@ export default function App() {
     } else {
       switch (ativo) {
         case "meus-pedidos": return <MeusPedidos farmaciaId={usuario.id} onRepetir={repetirPedido} />;
-        case "nova-solicitacao": return <NovaSolicitacao farmaciaId={usuario.id} laboratorios={laboratorios} itensIniciais={itensRepetir} onConsumirItensIniciais={() => setItensRepetir(null)} onSalvo={() => { setAtivo("meus-pedidos"); carregarDados(); }} />;
+        case "nova-solicitacao": return <SolicitacoesTabs farmaciaId={usuario.id} laboratorios={laboratorios} itensIniciais={itensRepetir} onConsumirItensIniciais={() => setItensRepetir(null)} onSalvo={() => { setAtivo("meus-pedidos"); carregarDados(); }} />;
         case "manutencao-farm": return <ManutencaoFarmacia farmaciaId={usuario.id} />;
-        case "previsao-farm": return <Previsao farmaciaId={usuario.id} isDono={false} farmacias={farmacias} />;
+        case "previsao-farm": return <Previsao farmaciaId={usuario.id} isDono={false} farmacias={farmacias} laboratorios={laboratorios} />;
         default: return null;
       }
     }
