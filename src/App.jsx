@@ -1797,6 +1797,7 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
 
   const salvar = async () => {
     if (itens.some(i => !i.nome)) { alert("Preencha o nome de todos os itens."); return; }
+    if (itens.some(i => !i.laboratorio_id)) { alert("Selecione o laboratório de todos os itens."); return; }
     setLoading(true);
     try {
       const pedido = await sb("pedidos", { method: "POST", body: JSON.stringify({ farmacia_id: farmaciaId, urgencia, observacao }) });
@@ -1854,7 +1855,7 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
             </div>
             <Select label="Categoria" value={item.categoria} onChange={v => editItem(i, "categoria", v)} options={categoriaOptions} />
             <div style={{ position: "relative", marginBottom: 16 }}>
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Laboratório</label>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Laboratório<span style={{ color: C.vermelho }}> *</span></label>
               <div
                 ref={el => { labRefs.current[i] = el; }}
                 onClick={() => {
@@ -1891,12 +1892,6 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
                     />
                   </div>
                   <div style={{ overflowY: "auto", flex: 1 }}>
-                    <div
-                      onClick={() => { editItem(i, "laboratorio_id", ""); setLabOpen(null); }}
-                      style={{ padding: "10px 14px", cursor: "pointer", fontSize: 13, color: C.cinzaT, borderBottom: `1px solid ${C.cinzaE}`, background: !item.laboratorio_id ? C.cinzaF : "transparent" }}
-                    >
-                      Sem laboratório
-                    </div>
                     {laboratorios
                       .filter(l => !labSearch[i] || l.nome.toLowerCase().includes((labSearch[i] || "").toLowerCase()))
                       .map(l => (
