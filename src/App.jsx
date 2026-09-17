@@ -88,6 +88,24 @@ const categoriaCor = {
 };
 const categoriaOptions = Object.entries(categoriaLabel).map(([value, label]) => ({ value, label }));
 
+// Unidade de contagem de um item de pedido: cada item guarda a sua própria (caixa ou
+// unidade). Pedidos antigos, salvos antes desse campo existir, ficam com unidade_medida
+// nula — tratados como "não informado" em vez de assumirem um valor inventado.
+const unidadeOptions = [{ value: "caixa", label: "Caixa" }, { value: "unidade", label: "Unidade" }];
+const unidadeLabelSingular = { caixa: "Caixa", unidade: "Unidade" };
+const unidadeLabelPlural = { caixa: "Caixas", unidade: "Unidades" };
+const unidadeLabelQtd = (unidade, qtd) => {
+  if (!unidade) return null;
+  const mapa = qtd === 1 ? unidadeLabelSingular : unidadeLabelPlural;
+  return mapa[unidade] || null;
+};
+const qtdPdfLabel = (item) => {
+  if (!item.unidade_medida) return `${item.quantidade}`;
+  const singular = item.unidade_medida === "caixa" ? "CAIXA" : "UNIDADE";
+  const plural = item.unidade_medida === "caixa" ? "CAIXAS" : "UNIDADES";
+  return `${item.quantidade} ${item.quantidade === 1 ? singular : plural}`;
+};
+
 const escHtml = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 const MobileCtx = createContext(false);
@@ -139,6 +157,48 @@ const Badge = ({ label, cor }) => (
   <span style={{ background: cor + "20", color: cor, border: `1px solid ${cor}40`, padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, letterSpacing: 0.5 }}>
     {label}
   </span>
+);
+
+// Botão segmentado simples (ex: Caixa/Unidade, Todas/Hoje/Período) — reaproveita o
+// visual dos selects do sistema em vez de introduzir um novo padrão visual.
+const Segmented = ({ options, value, onChange, small = false }) => (
+  <div style={{ display: "flex", border: `1.5px solid ${C.cinzaD}`, borderRadius: 10, overflow: "hidden" }}>
+    {options.map((o, i) => (
+      <button
+        key={o.value}
+        type="button"
+        onClick={() => onChange(o.value)}
+        style={{
+          flex: 1,
+          padding: small ? "6px 10px" : "9px 12px",
+          border: "none",
+          borderLeft: i > 0 ? `1.5px solid ${value === o.value || value === options[i - 1].value ? "transparent" : C.cinzaD}` : "none",
+          cursor: "pointer",
+          background: value === o.value ? C.azul : C.branco,
+          color: value === o.value ? C.branco : C.cinzaP,
+          fontWeight: 700,
+          fontSize: small ? 12 : 13,
+          fontFamily: "inherit",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {o.label}
+      </button>
+    ))}
+  </div>
+);
+
+// Mostra a quantidade de um item de pedido junto da unidade (caixa/unidade), quando
+// essa informação existir. Itens antigos sem unidade registrada mostram só a quantidade.
+const QtdUnidade = ({ quantidade, unidade, align = "flex-end" }) => (
+  <div style={{ display: "flex", flexDirection: "column", alignItems: align, minWidth: 40 }}>
+    <span style={{ fontWeight: 800, fontSize: 18, color: C.azul, lineHeight: 1.1 }}>×{quantidade}</span>
+    {unidadeLabelQtd(unidade, quantidade) && (
+      <span style={{ fontSize: 10, fontWeight: 700, color: C.cinzaT, textTransform: "uppercase", letterSpacing: 0.3 }}>
+        {unidadeLabelQtd(unidade, quantidade)}
+      </span>
+    )}
+  </div>
 );
 
 const Btn = ({ children, onClick, cor = C.azul, outline = false, small = false, disabled = false, full = false }) => (
@@ -575,6 +635,9 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   const [filtroStatus, setFiltroStatus] = useState("");
   const [filtroUrgencia, setFiltroUrgencia] = useState("");
   const [filtroSecao, setFiltroSecao] = useState("");
+  const [filtroDataModo, setFiltroDataModo] = useState("todas"); // "todas" | "hoje" | "periodo"
+  const [filtroDataDe, setFiltroDataDe] = useState("");
+  const [filtroDataAte, setFiltroDataAte] = useState("");
   const [categoriasPorPedido, setCategoriasPorPedido] = useState({});
   const [pedidoSelecionado, setPedidoSelecionado] = useState(null);
   const [itensPedido, setItensPedido] = useState([]);
@@ -582,8 +645,6 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   const [novoComentario, setNovoComentario] = useState("");
   const [geraPDF, setGeraPDF] = useState(false);
   const [labPDF, setLabPDF] = useState("");
-  const [farmPDF, setFarmPDF] = useState("");
-  const [secaoPDF, setSecaoPDF] = useState("");
   const [loadingPDF, setLoadingPDF] = useState(false);
   const [loadingItens, setLoadingItens] = useState(false);
   const [confirmExcluirPedido, setConfirmExcluirPedido] = useState(false);
@@ -607,11 +668,45 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtroSecao, pedidos]);
 
+  // Filtro por data: junto com farmácia/laboratório/seção, também precisa valer para o
+  // PDF — por isso vira uma função reaproveitada tanto na lista quanto em gerarPDFLab.
+  const passaFiltroData = (p) => {
+    if (filtroDataModo === "todas") return true;
+    const dataPedido = new Date(p.criado_em);
+    if (filtroDataModo === "hoje") {
+      const inicio = new Date(); inicio.setHours(0, 0, 0, 0);
+      const fim = new Date(inicio); fim.setDate(fim.getDate() + 1);
+      return dataPedido >= inicio && dataPedido < fim;
+    }
+    // periodo — "De" sozinho = data específica; "De"+"Até" = intervalo.
+    if (!filtroDataDe && !filtroDataAte) return true;
+    const de = filtroDataDe ? new Date(`${filtroDataDe}T00:00:00`) : null;
+    const ate = filtroDataAte ? new Date(`${filtroDataAte}T23:59:59.999`) : (filtroDataDe ? new Date(`${filtroDataDe}T23:59:59.999`) : null);
+    if (de && dataPedido < de) return false;
+    if (ate && dataPedido > ate) return false;
+    return true;
+  };
+
+  const formatarDataBR = (isoDateStr) => {
+    const [y, m, d] = isoDateStr.split("-");
+    return `${d}/${m}/${y}`;
+  };
+  const descricaoFiltroData = () => {
+    if (filtroDataModo === "hoje") return `Hoje (${new Date().toLocaleDateString("pt-BR")})`;
+    if (filtroDataModo === "periodo") {
+      if (filtroDataDe && filtroDataAte) return filtroDataDe === filtroDataAte ? formatarDataBR(filtroDataDe) : `${formatarDataBR(filtroDataDe)} até ${formatarDataBR(filtroDataAte)}`;
+      if (filtroDataDe) return formatarDataBR(filtroDataDe);
+      if (filtroDataAte) return `até ${formatarDataBR(filtroDataAte)}`;
+    }
+    return null;
+  };
+
   const pedidosFiltrados = pedidosLiberados.filter(p => {
     if (filtroFarmacia && p.farmacia_id !== filtroFarmacia) return false;
     if (filtroStatus && p.status !== filtroStatus) return false;
     if (filtroUrgencia && p.urgencia !== filtroUrgencia) return false;
     if (filtroSecao && !(categoriasPorPedido[p.id] || new Set()).has(filtroSecao)) return false;
+    if (!passaFiltroData(p)) return false;
     return true;
   });
 
@@ -699,7 +794,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
           <td>${i + 1}</td>
           <td><strong>${escHtml(item.nome_produto)}</strong></td>
           <td>${escHtml(categoriaLabel[item.categoria] || item.categoria)}</td>
-          <td style="text-align:center;font-weight:700;color:#1A3A8F">${item.quantidade}</td>
+          <td style="text-align:center;font-weight:700;color:#1A3A8F">${escHtml(qtdPdfLabel(item))}</td>
         </tr>`).join("");
       return `<div class="lab-section">
       <div class="lab-header">${escHtml(labNome)}</div>
@@ -753,25 +848,30 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
 
   const gerarPDFLab = async () => {
     const lab = labPDF ? laboratorios.find(l => l.id === labPDF) : null;
-    const farmSel = farmPDF ? farmacias.find(f => f.id === farmPDF) : null;
+    const farmSel = filtroFarmacia ? farmacias.find(f => f.id === filtroFarmacia) : null;
     setLoadingPDF(true);
     try {
+      // O PDF usa os mesmos filtros de Farmácia, Seção e Data já aplicados na lista acima,
+      // combinados com o Laboratório escolhido neste modal — nunca ignora um filtro visível.
       const pendingIds = pedidos
-        .filter(p => p.liberado_deposito !== false && (p.status === "pendente" || p.status === "em_andamento") && (!farmPDF || p.farmacia_id === farmPDF))
+        .filter(p => p.liberado_deposito !== false
+          && (p.status === "pendente" || p.status === "em_andamento")
+          && (!filtroFarmacia || p.farmacia_id === filtroFarmacia)
+          && passaFiltroData(p))
         .map(p => p.id);
 
       if (!pendingIds.length) {
-        alert("Nenhum pedido pendente ou em andamento encontrado.");
+        alert("Nenhum pedido pendente ou em andamento encontrado com os filtros selecionados.");
         setLoadingPDF(false);
         return;
       }
 
       const filtroLab = labPDF ? `laboratorio_id=eq.${labPDF}&` : "";
-      const filtroSecaoPDF = secaoPDF ? `categoria=eq.${secaoPDF}&` : "";
+      const filtroSecaoPDF = filtroSecao ? `categoria=eq.${filtroSecao}&` : "";
       const itens = await sb(`pedido_itens?${filtroLab}${filtroSecaoPDF}pedido_id=in.(${pendingIds.join(",")})&order=nome_laboratorio.asc,nome_produto.asc`);
 
       if (!itens.length) {
-        alert(lab ? `Nenhum item pendente para o laboratório "${lab.nome}".` : "Nenhum item pendente ou em andamento encontrado.");
+        alert(lab ? `Nenhum item pendente para o laboratório "${lab.nome}" com os filtros selecionados.` : "Nenhum item pendente ou em andamento encontrado com os filtros selecionados.");
         setLoadingPDF(false);
         return;
       }
@@ -779,11 +879,13 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
       const dataStr = new Date().toLocaleDateString("pt-BR");
       const horaStr = new Date().toLocaleString("pt-BR");
 
-      const secaoNome = secaoPDF ? categoriaLabel[secaoPDF] || secaoPDF : "";
+      const secaoNome = filtroSecao ? categoriaLabel[filtroSecao] || filtroSecao : "";
+      const dataFiltroDescricao = descricaoFiltroData();
       const tituloPrincipal = [
         lab ? `Pedido ${lab.nome}` : "Pedidos",
         farmSel ? `Farmácia ${farmSel.nome}` : "Todas as Farmácias",
         secaoNome ? `Seção ${secaoNome}` : null,
+        dataFiltroDescricao ? `Data ${dataFiltroDescricao}` : null,
       ].filter(Boolean).join(" — ");
 
       const linhaItem = (item, i) => {
@@ -794,7 +896,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
           <td><strong>${escHtml(item.nome_produto)}</strong></td>
           <td>${escHtml(categoriaLabel[item.categoria] || item.categoria)}</td>
           <td>${escHtml(farm?.nome || "—")}</td>
-          <td style="text-align:center;font-weight:700;color:#1A3A8F">${item.quantidade}</td>
+          <td style="text-align:center;font-weight:700;color:#1A3A8F">${escHtml(qtdPdfLabel(item))}</td>
         </tr>`;
       };
 
@@ -858,7 +960,8 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     <img src="https://i.postimg.cc/pVwVTC9j/LOGO-VERTICALL-EM-PNG.png" alt="Hiperafarma" onerror="this.style.display='none'">
     <div class="header-right">
       <div class="lab-name">${escHtml(tituloPrincipal)}</div>
-      <div class="date">Data: ${dataStr}</div>
+      <div class="date">Gerado em: ${dataStr}</div>
+      <div class="date">Filtro de data: ${escHtml(dataFiltroDescricao || "Todas")}</div>
       <div class="date">Itens pendentes e em andamento</div>
     </div>
   </div>
@@ -924,7 +1027,22 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
               {categoriaOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
-          <Btn onClick={() => { setFiltroFarmacia(""); setFiltroStatus(""); setFiltroUrgencia(""); setFiltroSecao(""); }} outline cor={C.cinzaT} small>Limpar</Btn>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>DATA</label>
+            <Segmented
+              small
+              options={[{ value: "todas", label: "Todas" }, { value: "hoje", label: "Hoje" }, { value: "periodo", label: "Data específica / Período" }]}
+              value={filtroDataModo}
+              onChange={setFiltroDataModo}
+            />
+            {filtroDataModo === "periodo" && (
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <input type="date" value={filtroDataDe} onChange={e => setFiltroDataDe(e.target.value)} style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 12, fontFamily: "inherit", background: C.branco, minWidth: 0 }} />
+                <input type="date" value={filtroDataAte} onChange={e => setFiltroDataAte(e.target.value)} style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 12, fontFamily: "inherit", background: C.branco, minWidth: 0 }} />
+              </div>
+            )}
+          </div>
+          <Btn onClick={() => { setFiltroFarmacia(""); setFiltroStatus(""); setFiltroUrgencia(""); setFiltroSecao(""); setFiltroDataModo("todas"); setFiltroDataDe(""); setFiltroDataAte(""); }} outline cor={C.cinzaT} small>Limpar</Btn>
         </div>
       </Card>
 
@@ -1033,7 +1151,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <Badge label={categoriaLabel[item.categoria] || item.categoria} cor={categoriaCor[item.categoria] || C.cinzaT} />
-                  <span style={{ fontWeight: 800, fontSize: 18, color: C.azul, minWidth: 40, textAlign: "right" }}>×{item.quantidade}</span>
+                  <QtdUnidade quantidade={item.quantidade} unidade={item.unidade_medida} />
                 </div>
               </div>
             ))}
@@ -1047,10 +1165,15 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
 
       {/* Modal PDF */}
       {geraPDF && (
-        <Modal title="Gerar PDF de Pedidos" onClose={() => { setGeraPDF(false); setFarmPDF(""); setLabPDF(""); setSecaoPDF(""); }} width={440}>
-          <p style={{ color: C.cinzaT, fontSize: 14, marginBottom: 20 }}>
-            Filtre por laboratório, farmácia e/ou seção, se desejar. Sem filtros, o PDF traz todos os pedidos de todas as farmácias, separados por laboratório (um laboratório por página).
+        <Modal title="Gerar PDF de Pedidos" onClose={() => { setGeraPDF(false); setLabPDF(""); }} width={440}>
+          <p style={{ color: C.cinzaT, fontSize: 14, marginBottom: 12 }}>
+            O PDF usa os filtros de <strong>Farmácia</strong>, <strong>Seção</strong> e <strong>Data</strong> já aplicados na lista de Pedidos. Escolha também um laboratório, se quiser (um laboratório por página).
           </p>
+          <div style={{ background: C.cinzaF, borderRadius: 10, padding: "10px 14px", marginBottom: 20, fontSize: 12, color: C.cinzaP, lineHeight: 1.6 }}>
+            <div><strong>Farmácia:</strong> {filtroFarmacia ? (farmacias.find(f => f.id === filtroFarmacia)?.nome || "—") : "Todas"}</div>
+            <div><strong>Seção:</strong> {filtroSecao ? (categoriaLabel[filtroSecao] || filtroSecao) : "Todas"}</div>
+            <div><strong>Data:</strong> {descricaoFiltroData() || "Todas"}</div>
+          </div>
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Laboratório (opcional)</label>
             <select value={labPDF} onChange={e => setLabPDF(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}>
@@ -1058,25 +1181,11 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
               {laboratorios.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
             </select>
           </div>
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Farmácia (opcional)</label>
-            <select value={farmPDF} onChange={e => setFarmPDF(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}>
-              <option value="">Todas as farmácias</option>
-              {farmacias.filter(f => f.usuario !== "admin" && f.ativa !== false).map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
-            </select>
-          </div>
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Seção (opcional)</label>
-            <select value={secaoPDF} onChange={e => setSecaoPDF(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}>
-              <option value="">Todas as seções</option>
-              {categoriaOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </div>
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
             <Btn onClick={gerarPDFLab} cor={C.vermelho} disabled={loadingPDF} full>
               <Icon name="pdf" size={16} color={C.branco} /> {loadingPDF ? "Gerando..." : "Gerar e Imprimir PDF"}
             </Btn>
-            <Btn onClick={() => { setGeraPDF(false); setFarmPDF(""); setLabPDF(""); setSecaoPDF(""); }} outline cor={C.cinzaT}>Cancelar</Btn>
+            <Btn onClick={() => { setGeraPDF(false); setLabPDF(""); }} outline cor={C.cinzaT}>Cancelar</Btn>
           </div>
         </Modal>
       )}
@@ -1208,6 +1317,7 @@ const Deposito = ({ pedidos, farmacias, onAtualizar }) => {
                     {" • "}
                     {categoriaLabel[item.categoria] || item.categoria}
                     {" • ×"}{item.quantidade}
+                    {unidadeLabelQtd(item.unidade_medida, item.quantidade) ? ` ${unidadeLabelQtd(item.unidade_medida, item.quantidade)}` : ""}
                   </div>
                 </div>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flexShrink: 0 }}>
@@ -1616,7 +1726,7 @@ const GerenciarLaboratorios = ({ laboratorios, onAtualizar }) => {
 // =============================================
 // NOVA SOLICITAÇÃO (farmácia)
 // =============================================
-const itemVazio = { nome: "", categoria: "eticos", laboratorio_id: "", quantidade: 1, motivo: "esgotou" };
+const itemVazio = { nome: "", categoria: "eticos", laboratorio_id: "", quantidade: 1, unidade: "unidade", motivo: "esgotou" };
 const gerarIdRascunho = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 const novoRascunho = (itens) => ({ id: gerarIdRascunho(), urgencia: "normal", observacao: "", itens: itens && itens.length ? itens : [{ ...itemVazio }] });
 
@@ -1761,6 +1871,7 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
   const setUrgencia = v => onChange({ urgencia: v });
   const setObservacao = v => onChange({ observacao: v });
   const setItens = novos => onChange({ itens: novos });
+  const isMobile = useMobile();
 
   const [sugestoes, setSugestoes] = useState([]);
   const [indexAtivo, setIndexAtivo] = useState(null);
@@ -1791,7 +1902,7 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
     setIndexAtivo(null);
   };
 
-  const addItem = () => setItens([...itens, { nome: "", categoria: "eticos", laboratorio_id: "", quantidade: 1, motivo: "esgotou" }]);
+  const addItem = () => setItens([...itens, { nome: "", categoria: "eticos", laboratorio_id: "", quantidade: 1, unidade: "unidade", motivo: "esgotou" }]);
   const remItem = (i) => setItens(itens.filter((_, idx) => idx !== i));
   const editItem = (i, campo, val) => { const n = itens.map((it, idx) => idx === i ? { ...it, [campo]: val } : it); setItens(n); };
 
@@ -1811,7 +1922,7 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
         } catch {}
 
         const lab = laboratorios.find(l => l.id === item.laboratorio_id);
-        await sb("pedido_itens", { method: "POST", body: JSON.stringify({ pedido_id: pedidoId, produto_id: produtoId, nome_produto: item.nome.toUpperCase(), categoria: item.categoria, laboratorio_id: item.laboratorio_id || null, nome_laboratorio: lab?.nome || null, quantidade: item.quantidade, motivo: item.motivo }) });
+        await sb("pedido_itens", { method: "POST", body: JSON.stringify({ pedido_id: pedidoId, produto_id: produtoId, nome_produto: item.nome.toUpperCase(), categoria: item.categoria, laboratorio_id: item.laboratorio_id || null, nome_laboratorio: lab?.nome || null, quantidade: item.quantidade, unidade_medida: item.unidade || "unidade", motivo: item.motivo }) });
       }
 
       await sb("logs", { method: "POST", body: JSON.stringify({ farmacia_id: farmaciaId, pedido_id: pedidoId, acao: "Pedido criado", detalhes: `${itens.length} itens` }) });
@@ -1908,9 +2019,15 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
                 </div>
               )}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: 12 }}>
               <Input label="Quantidade" value={item.quantidade} onChange={v => editItem(i, "quantidade", parseInt(v) || 1)} type="number" />
-              <Select label="Motivo" value={item.motivo} onChange={v => editItem(i, "motivo", v)} options={[{ value: "esgotou", label: "Esgotou" }, { value: "venceu", label: "Venceu" }, { value: "nunca_tivemos", label: "Nunca tivemos" }, { value: "outro", label: "Outro" }]} />
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Caixa ou Unidade</label>
+                <Segmented options={unidadeOptions} value={item.unidade || "unidade"} onChange={v => editItem(i, "unidade", v)} />
+              </div>
+              <div style={{ gridColumn: isMobile ? "1 / -1" : "auto" }}>
+                <Select label="Motivo" value={item.motivo} onChange={v => editItem(i, "motivo", v)} options={[{ value: "esgotou", label: "Esgotou" }, { value: "venceu", label: "Venceu" }, { value: "nunca_tivemos", label: "Nunca tivemos" }, { value: "outro", label: "Outro" }]} />
+              </div>
             </div>
           </div>
         </Card>
@@ -1988,6 +2105,10 @@ const MeusPedidos = ({ farmaciaId, onRepetir }) => {
           categoria: item.categoria,
           laboratorio_id: item.laboratorio_id || "",
           quantidade: item.quantidade,
+          // Mantém caixa/unidade do pedido original quando registrado; pedidos antigos sem
+          // essa informação caem no padrão "unidade" apenas como valor inicial editável do
+          // formulário — o usuário revisa e pode ajustar antes de reenviar.
+          unidade: item.unidade_medida || "unidade",
           motivo: item.motivo || "esgotou",
         })));
       }
@@ -2085,7 +2206,7 @@ const MeusPedidos = ({ farmaciaId, onRepetir }) => {
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <Badge label={categoriaLabel[item.categoria] || item.categoria} cor={categoriaCor[item.categoria] || C.cinzaT} />
-                  <span style={{ fontWeight: 800, fontSize: 18, color: C.azul }}>×{item.quantidade}</span>
+                  <QtdUnidade quantidade={item.quantidade} unidade={item.unidade_medida} />
                 </div>
               </div>
             ))}
@@ -2171,9 +2292,35 @@ const mediana = (valores) => {
   return s.length % 2 ? s[meio] : (s[meio - 1] + s[meio]) / 2;
 };
 
-// Calcula a previsão de pedido a partir do histórico real de pedido_itens de uma farmácia.
+// Períodos disponíveis para a previsão. Cada um retorna o intervalo de datas exato
+// considerado (mostrado na tela e no PDF) e o número de dias usado para escalar o
+// consumo diário — nunca um rótulo trocado sobre o mesmo número.
+const periodoPrevisaoOptions = [
+  { value: "15dias", label: "Próximos 15 dias" },
+  { value: "estemes", label: "Este mês" },
+  { value: "proximomes", label: "Próximo mês" },
+];
+const calcularPeriodoPrevisao = (periodo, base = new Date()) => {
+  const hoje = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  if (periodo === "estemes") {
+    const fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
+    const dias = Math.max(1, Math.round((fim - hoje) / 86400000) + 1);
+    return { inicio: hoje, fim, dias, label: "Este mês" };
+  }
+  if (periodo === "proximomes") {
+    const inicio = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1);
+    const fim = new Date(hoje.getFullYear(), hoje.getMonth() + 2, 0);
+    const dias = Math.round((fim - inicio) / 86400000) + 1;
+    return { inicio, fim, dias, label: "Próximo mês" };
+  }
+  const fim = new Date(hoje); fim.setDate(fim.getDate() + 15);
+  return { inicio: hoje, fim, dias: 15, label: "Próximos 15 dias" };
+};
+
+// Calcula a previsão de pedido a partir do histórico real de pedido_itens de uma farmácia,
+// projetada para o horizonte de "diasHorizonte" dias escolhido pelo usuário.
 // Não gera nenhum número aleatório: tudo vem de quantidades e datas já registradas no sistema.
-const calcularPrevisao = (itens) => {
+const calcularPrevisao = (itens, diasHorizonte) => {
   const grupos = {};
   itens.forEach(item => {
     const chave = item.nome_produto;
@@ -2196,7 +2343,18 @@ const calcularPrevisao = (itens) => {
 
     // Mediana das últimas até 6 quantidades pedidas: robusta a pedidos muito fora do padrão.
     const ultimasQtds = ordenadas.slice(0, 6).map(o => o.quantidade);
-    const previsaoQuantidade = Math.round(mediana(ultimasQtds));
+    const medianaQtd = mediana(ultimasQtds);
+
+    // Taxa de consumo diário real: quantidade típica pedida dividida pelo intervalo médio
+    // real entre pedidos dessa farmácia para esse produto. É isso que permite escalar a
+    // previsão para o horizonte escolhido (15 dias / mês) em vez de repetir sempre o mesmo
+    // número. Só existe quando há pelo menos 2 pedidos — com 1 único pedido não há
+    // intervalo real observado, e a previsão não inventa uma taxa de consumo.
+    const consumoDiario = intervaloMedioDias && intervaloMedioDias > 0 ? medianaQtd / intervaloMedioDias : null;
+    const temHistoricoSuficiente = consumoDiario != null;
+    const previsaoQuantidade = temHistoricoSuficiente
+      ? Math.max(0, Math.round(consumoDiario * diasHorizonte))
+      : Math.round(medianaQtd);
 
     return {
       nome,
@@ -2209,6 +2367,8 @@ const calcularPrevisao = (itens) => {
       intervaloMedioDias,
       diasDesdeUltimoPedido,
       urgenciaRepedido,
+      consumoDiario,
+      temHistoricoSuficiente,
       previsaoQuantidade,
     };
   });
@@ -2222,6 +2382,7 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
   const [farmaciaSel, setFarmaciaSel] = useState(isDono ? "" : farmaciaId);
   const [laboratorioSel, setLaboratorioSel] = useState("");
   const [secaoSel, setSecaoSel] = useState("");
+  const [periodoPrevisao, setPeriodoPrevisao] = useState("15dias");
   const [dados, setDados] = useState([]);
   const [loading, setLoading] = useState(false);
   const [pdfHtml, setPdfHtml] = useState(null);
@@ -2229,6 +2390,8 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
   const farmaciaAtivaId = isDono ? farmaciaSel : farmaciaId;
   const farmaciaAtiva = farmacias.find(f => f.id === farmaciaAtivaId);
   const laboratorioAtivo = laboratorioSel ? laboratorios.find(l => l.id === laboratorioSel) : null;
+  const periodoInfo = calcularPeriodoPrevisao(periodoPrevisao);
+  const formatarDataCurta = (d) => d.toLocaleDateString("pt-BR");
 
   useEffect(() => {
     if (!farmaciaAtivaId) { setDados([]); return; }
@@ -2239,7 +2402,8 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
         if (laboratorioSel) query += `&laboratorio_id=eq.${laboratorioSel}`;
         if (secaoSel) query += `&categoria=eq.${secaoSel}`;
         const itens = await sb(query);
-        setDados(calcularPrevisao(itens));
+        const { dias } = calcularPeriodoPrevisao(periodoPrevisao);
+        setDados(calcularPrevisao(itens, dias));
       } catch (e) {
         console.error(e);
         setDados([]);
@@ -2247,7 +2411,7 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
       setLoading(false);
     };
     carregarPrevisao();
-  }, [farmaciaAtivaId, laboratorioSel, secaoSel]);
+  }, [farmaciaAtivaId, laboratorioSel, secaoSel, periodoPrevisao]);
 
   const gerarPDFPrevisao = () => {
     if (!farmaciaAtiva || !dados.length) return;
@@ -2265,14 +2429,18 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
         <td>${escHtml(d.laboratorioNome || "—")}</td>
         <td style="text-align:center">${d.numOcorrencias}</td>
         <td style="text-align:center">${d.intervaloMedioDias ? Math.round(d.intervaloMedioDias) + "d" : "—"}</td>
-        <td style="text-align:center;font-weight:700;color:#1A3A8F">${d.previsaoQuantidade}</td>
+        <td style="text-align:center;font-weight:700;color:#1A3A8F">${d.previsaoQuantidade}${d.temHistoricoSuficiente ? "" : "*"}</td>
       </tr>`).join("");
+
+    const inicioStr = formatarDataCurta(periodoInfo.inicio);
+    const fimStr = formatarDataCurta(periodoInfo.fim);
+    const temItemSemHistorico = dados.some(d => !d.temHistoricoSuficiente);
 
     const html = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>Previsão de Pedido — ${escHtml(farmaciaAtiva.nome)} — ${dataStr}</title>
+  <title>Previsão de Demanda — ${escHtml(farmaciaAtiva.nome)} — ${dataStr}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, Helvetica, sans-serif; padding: 40px; color: #0F172A; font-size: 13px; }
@@ -2282,6 +2450,7 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
     .tag { display: inline-block; background: #F5A800; color: #1A3A8F; font-weight: 800; font-size: 11px; letter-spacing: 0.5px; padding: 4px 10px; border-radius: 20px; margin-bottom: 6px; }
     .farm-name { font-size: 20px; font-weight: 800; color: #1A3A8F; margin-bottom: 4px; }
     .date { color: #6B7A99; font-size: 12px; }
+    .periodo { color: #1A3A8F; font-size: 13px; font-weight: 700; margin-top: 4px; }
     .aviso { background: #FFF7E6; border: 1px solid #F5A800; border-radius: 8px; padding: 10px 14px; margin-bottom: 20px; font-size: 12px; color: #7A5300; }
     .filtros { color: #6B7A99; font-size: 12px; margin-bottom: 16px; }
     table { width: 100%; border-collapse: collapse; }
@@ -2298,17 +2467,20 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
   <div class="header">
     <img src="https://i.postimg.cc/pVwVTC9j/LOGO-VERTICALL-EM-PNG.png" alt="Hiperafarma" onerror="this.style.display='none'">
     <div class="header-right">
-      <div class="tag">PREVISÃO DE PEDIDO</div>
-      <div class="farm-name">${escHtml(farmaciaAtiva.nome)}</div>
+      <div class="tag">PREVISÃO DE DEMANDA</div>
+      <div class="farm-name">Farmácia: ${escHtml(farmaciaAtiva.nome)}</div>
       <div class="date">Gerado em: ${dataStr}</div>
+      <div class="periodo">Período previsto: ${escHtml(periodoInfo.label)}</div>
+      <div class="date">De: ${inicioStr} — Até: ${fimStr}</div>
     </div>
   </div>
   <div class="aviso">⚠️ Este documento é uma <strong>previsão</strong> calculada a partir do histórico de pedidos da farmácia — não é um pedido confirmado.</div>
   ${filtrosAplicados ? `<div class="filtros">Filtros aplicados: ${escHtml(filtrosAplicados)}</div>` : ""}
   <table>
-    <thead><tr><th>#</th><th>Produto</th><th>Seção</th><th>Laboratório</th><th>Nº pedidos</th><th>Intervalo médio</th><th>Previsão (qtd)</th></tr></thead>
+    <thead><tr><th>#</th><th>Produto</th><th>Seção</th><th>Laboratório</th><th>Nº pedidos</th><th>Intervalo médio</th><th>Previsão (${periodoInfo.dias}d)</th></tr></thead>
     <tbody>${linhas}</tbody>
   </table>
+  ${temItemSemHistorico ? `<div class="filtros">* Histórico com apenas 1 pedido registrado — sem intervalo real para projetar por período; mostra a última quantidade pedida.</div>` : ""}
   <div class="footer">Hiperafarma Drogarias — Gerado em ${horaStr} — Documento de uso interno, sujeito a revisão manual</div>
   <script>window.onload = function() { window.print(); }</script>
 </body>
@@ -2354,11 +2526,26 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
               {categoriaOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>PERÍODO DA PREVISÃO</label>
+            <select value={periodoPrevisao} onChange={e => setPeriodoPrevisao(e.target.value)} style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 13, fontFamily: "inherit", background: C.branco }}>
+              {periodoPrevisaoOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
           {(laboratorioSel || secaoSel) && (
             <Btn onClick={() => { setLaboratorioSel(""); setSecaoSel(""); }} outline cor={C.cinzaT} small>Limpar</Btn>
           )}
         </div>
       </Card>
+
+      {farmaciaAtivaId && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, background: C.azul + "10", border: `1.5px solid ${C.azul}30`, borderRadius: 12, padding: "12px 16px", marginBottom: 20, flexWrap: "wrap" }}>
+          <Icon name="previsao" size={18} color={C.azul} />
+          <div style={{ fontSize: 13, color: C.azul }}>
+            <strong>Previsão: {periodoInfo.label}</strong> · {formatarDataCurta(periodoInfo.inicio)} até {formatarDataCurta(periodoInfo.fim)} ({periodoInfo.dias} dias)
+          </div>
+        </div>
+      )}
 
       {!farmaciaAtivaId ? (
         <Card><p style={{ color: C.cinzaT, textAlign: "center", margin: 0 }}>Selecione uma farmácia para calcular a previsão de pedido.</p></Card>
@@ -2378,7 +2565,7 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
                     <th style={{ textAlign: "left", padding: "10px 16px", fontSize: 11, fontWeight: 700, color: C.cinzaT, textTransform: "uppercase" }}>Laboratório</th>
                     <th style={{ textAlign: "center", padding: "10px 16px", fontSize: 11, fontWeight: 700, color: C.cinzaT, textTransform: "uppercase" }}>Nº pedidos</th>
                     <th style={{ textAlign: "center", padding: "10px 16px", fontSize: 11, fontWeight: 700, color: C.cinzaT, textTransform: "uppercase" }}>Intervalo médio</th>
-                    <th style={{ textAlign: "center", padding: "10px 16px", fontSize: 11, fontWeight: 700, color: C.azul, textTransform: "uppercase" }}>Previsão</th>
+                    <th style={{ textAlign: "center", padding: "10px 16px", fontSize: 11, fontWeight: 700, color: C.azul, textTransform: "uppercase" }}>Previsão ({periodoInfo.dias}d)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2391,6 +2578,9 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
                       <td style={{ padding: "10px 16px", textAlign: "center", fontSize: 13, color: C.cinzaP }}>{d.intervaloMedioDias ? `${Math.round(d.intervaloMedioDias)}d` : "—"}</td>
                       <td style={{ padding: "10px 16px", textAlign: "center" }}>
                         <span style={{ fontWeight: 700, color: C.azul, background: C.azul + "15", padding: "4px 12px", borderRadius: 8 }}>{d.previsaoQuantidade} un.</span>
+                        {!d.temHistoricoSuficiente && (
+                          <div style={{ fontSize: 10, color: C.cinzaT, marginTop: 3 }}>histórico único</div>
+                        )}
                       </td>
                     </tr>
                   ))}
