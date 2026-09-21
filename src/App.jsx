@@ -88,6 +88,12 @@ const categoriaCor = {
 };
 const categoriaOptions = Object.entries(categoriaLabel).map(([value, label]) => ({ value, label }));
 
+// Tipo/origem de um pedido: Depósito (fluxo padrão de revisão de estoque), ou compras
+// diretas via ED/CA. Escolhido pela farmácia ao criar a solicitação.
+const tipoPedidoLabel = { deposito: "Depósito", compras_ed: "Compras ED", compras_ca: "Compras CA" };
+const tipoPedidoCor = { deposito: C.azulClaro, compras_ed: C.laranja, compras_ca: "#7C3AED" };
+const tipoPedidoOptions = Object.entries(tipoPedidoLabel).map(([value, label]) => ({ value, label }));
+
 // Unidade de contagem de um item de pedido: cada item guarda a sua própria (caixa ou
 // unidade). Pedidos antigos, salvos antes desse campo existir, ficam com unidade_medida
 // nula — tratados como "não informado" em vez de assumirem um valor inventado.
@@ -638,7 +644,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   const [filtroDataModo, setFiltroDataModo] = useState("todas"); // "todas" | "hoje" | "periodo"
   const [filtroDataDe, setFiltroDataDe] = useState("");
   const [filtroDataAte, setFiltroDataAte] = useState("");
-  const [categoriasPorPedido, setCategoriasPorPedido] = useState({});
+  const [pedidoIdsDaSecao, setPedidoIdsDaSecao] = useState(null);
   const [pedidoSelecionado, setPedidoSelecionado] = useState(null);
   const [itensPedido, setItensPedido] = useState([]);
   const [comentarios, setComentarios] = useState([]);
@@ -653,20 +659,23 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   // Só entram no painel de Pedidos os pedidos já liberados pelo Depósito.
   const pedidosLiberados = pedidos.filter(p => p.liberado_deposito !== false);
 
+  // Busca direto por categoria (sem passar a lista de IDs de pedidos na URL): com muitos
+  // pedidos liberados, um "pedido_id=in.(...)" gigante estourava o limite de tamanho da
+  // query e falhava silenciosamente (catch vazio), deixando o filtro sempre vazio.
   useEffect(() => {
-    const carregarCategorias = async () => {
-      if (!filtroSecao || !pedidosLiberados.length) return;
+    if (!filtroSecao) { setPedidoIdsDaSecao(null); return; }
+    let cancelado = false;
+    (async () => {
       try {
-        const ids = pedidosLiberados.map(p => p.id).join(",");
-        const itens = await sb(`pedido_itens?pedido_id=in.(${ids})&select=pedido_id,categoria`);
-        const mapa = {};
-        itens.forEach(i => { (mapa[i.pedido_id] || (mapa[i.pedido_id] = new Set())).add(i.categoria); });
-        setCategoriasPorPedido(mapa);
-      } catch {}
-    };
-    carregarCategorias();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtroSecao, pedidos]);
+        const itens = await sb(`pedido_itens?categoria=eq.${encodeURIComponent(filtroSecao)}&select=pedido_id`);
+        if (cancelado) return;
+        setPedidoIdsDaSecao(new Set(itens.map(i => i.pedido_id)));
+      } catch {
+        if (!cancelado) setPedidoIdsDaSecao(new Set());
+      }
+    })();
+    return () => { cancelado = true; };
+  }, [filtroSecao]);
 
   // Filtro por data: junto com farmácia/laboratório/seção, também precisa valer para o
   // PDF — por isso vira uma função reaproveitada tanto na lista quanto em gerarPDFLab.
@@ -705,7 +714,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     if (filtroFarmacia && p.farmacia_id !== filtroFarmacia) return false;
     if (filtroStatus && p.status !== filtroStatus) return false;
     if (filtroUrgencia && p.urgencia !== filtroUrgencia) return false;
-    if (filtroSecao && !(categoriasPorPedido[p.id] || new Set()).has(filtroSecao)) return false;
+    if (filtroSecao && !(pedidoIdsDaSecao && pedidoIdsDaSecao.has(p.id))) return false;
     if (!passaFiltroData(p)) return false;
     return true;
   });
@@ -1166,13 +1175,37 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
       {/* Modal PDF */}
       {geraPDF && (
         <Modal title="Gerar PDF de Pedidos" onClose={() => { setGeraPDF(false); setLabPDF(""); }} width={440}>
-          <p style={{ color: C.cinzaT, fontSize: 14, marginBottom: 12 }}>
-            O PDF usa os filtros de <strong>Farmácia</strong>, <strong>Seção</strong> e <strong>Data</strong> já aplicados na lista de Pedidos. Escolha também um laboratório, se quiser (um laboratório por página).
+          <p style={{ color: C.cinzaT, fontSize: 14, marginBottom: 16 }}>
+            Escolha os filtros do PDF abaixo — eles também atualizam a lista de Pedidos ao fundo.
           </p>
-          <div style={{ background: C.cinzaF, borderRadius: 10, padding: "10px 14px", marginBottom: 20, fontSize: 12, color: C.cinzaP, lineHeight: 1.6 }}>
-            <div><strong>Farmácia:</strong> {filtroFarmacia ? (farmacias.find(f => f.id === filtroFarmacia)?.nome || "—") : "Todas"}</div>
-            <div><strong>Seção:</strong> {filtroSecao ? (categoriaLabel[filtroSecao] || filtroSecao) : "Todas"}</div>
-            <div><strong>Data:</strong> {descricaoFiltroData() || "Todas"}</div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Farmácia</label>
+            <select value={filtroFarmacia} onChange={e => setFiltroFarmacia(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}>
+              <option value="">Todas as farmácias</option>
+              {farmacias.filter(f => f.usuario !== "admin" && f.ativa !== false).map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
+            </select>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Seção</label>
+            <select value={filtroSecao} onChange={e => setFiltroSecao(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}>
+              <option value="">Todas as seções</option>
+              {categoriaOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Data</label>
+            <Segmented
+              small
+              options={[{ value: "todas", label: "Todas" }, { value: "hoje", label: "Hoje" }, { value: "periodo", label: "Data específica / Período" }]}
+              value={filtroDataModo}
+              onChange={setFiltroDataModo}
+            />
+            {filtroDataModo === "periodo" && (
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <input type="date" value={filtroDataDe} onChange={e => setFiltroDataDe(e.target.value)} style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 12, fontFamily: "inherit", background: C.branco, minWidth: 0 }} />
+                <input type="date" value={filtroDataAte} onChange={e => setFiltroDataAte(e.target.value)} style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 12, fontFamily: "inherit", background: C.branco, minWidth: 0 }} />
+              </div>
+            )}
           </div>
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Laboratório (opcional)</label>
@@ -1208,14 +1241,18 @@ const Deposito = ({ pedidos, farmacias, onAtualizar }) => {
   const [marcados, setMarcados] = useState({});
   const [loadingItens, setLoadingItens] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [filtroTipoPedido, setFiltroTipoPedido] = useState("");
 
-  const pedidosDeposito = pedidos.filter(p => p.liberado_deposito === false);
+  const pedidosAguardando = pedidos.filter(p => p.liberado_deposito === false);
+  // Sem filtro selecionado, continua mostrando todos os pedidos aguardando o Depósito.
+  const pedidosDeposito = pedidosAguardando
+    .filter(p => !filtroTipoPedido || (p.tipo_pedido || "deposito") === filtroTipoPedido);
 
   useEffect(() => {
     const carregarContagens = async () => {
-      if (!pedidosDeposito.length) { setItensCount({}); return; }
+      if (!pedidosAguardando.length) { setItensCount({}); return; }
       try {
-        const itens = await sb(`pedido_itens?pedido_id=in.(${pedidosDeposito.map(p => p.id).join(",")})&select=pedido_id`);
+        const itens = await sb(`pedido_itens?pedido_id=in.(${pedidosAguardando.map(p => p.id).join(",")})&select=pedido_id`);
         const contagem = {};
         itens.forEach(i => { contagem[i.pedido_id] = (contagem[i.pedido_id] || 0) + 1; });
         setItensCount(contagem);
@@ -1259,11 +1296,29 @@ const Deposito = ({ pedidos, farmacias, onAtualizar }) => {
         <p style={{ margin: 0, color: C.cinzaT, fontSize: 14 }}>{pedidosDeposito.length} pedidos aguardando revisão de estoque</p>
       </div>
 
+      <Card style={{ marginBottom: 20, padding: 16 }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>TIPO DE PEDIDO</label>
+            <Segmented
+              small
+              options={[{ value: "", label: "Todos" }, ...tipoPedidoOptions]}
+              value={filtroTipoPedido}
+              onChange={setFiltroTipoPedido}
+            />
+          </div>
+          {filtroTipoPedido && (
+            <Btn onClick={() => setFiltroTipoPedido("")} outline cor={C.cinzaT} small>Limpar</Btn>
+          )}
+        </div>
+      </Card>
+
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {pedidosDeposito.length === 0 ? (
           <Card><p style={{ color: C.cinzaT, textAlign: "center", margin: 0 }}>Nenhum pedido pendente para revisão.</p></Card>
         ) : pedidosDeposito.map(p => {
           const farm = farmacias.find(f => f.id === p.farmacia_id);
+          const tipo = p.tipo_pedido || "deposito";
           return (
             <Card key={p.id} style={{ padding: 16, cursor: "pointer", transition: "box-shadow 0.15s" }} onClick={() => abrirPedido(p)}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -1278,6 +1333,7 @@ const Deposito = ({ pedidos, farmacias, onAtualizar }) => {
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <Badge label={tipoPedidoLabel[tipo] || tipo} cor={tipoPedidoCor[tipo] || C.cinzaT} />
                   <Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
                   <Badge label={statusLabel[p.status]} cor={statusCor[p.status]} />
                   <BtnIcon icon="olho" cor={C.azulClaro} title="Revisar pedido" onClick={e => { e.stopPropagation(); abrirPedido(p); }} />
@@ -1291,6 +1347,7 @@ const Deposito = ({ pedidos, farmacias, onAtualizar }) => {
       {pedidoSelecionado && (
         <Modal title={`Revisão de Estoque — ${farmacias.find(f => f.id === pedidoSelecionado.farmacia_id)?.nome}`} onClose={() => setPedidoSelecionado(null)} width={680}>
           <div style={{ display: "flex", gap: 8, marginBottom: 20, alignItems: "center", flexWrap: "wrap" }}>
+            <Badge label={tipoPedidoLabel[pedidoSelecionado.tipo_pedido || "deposito"] || pedidoSelecionado.tipo_pedido} cor={tipoPedidoCor[pedidoSelecionado.tipo_pedido || "deposito"] || C.cinzaT} />
             <Badge label={urgenciaLabel[pedidoSelecionado.urgencia]} cor={urgenciaCor[pedidoSelecionado.urgencia]} />
             <Badge label={statusLabel[pedidoSelecionado.status]} cor={statusCor[pedidoSelecionado.status]} />
             <span style={{ fontSize: 12, color: C.cinzaT }}>{new Date(pedidoSelecionado.criado_em).toLocaleString("pt-BR")}</span>
@@ -1728,7 +1785,7 @@ const GerenciarLaboratorios = ({ laboratorios, onAtualizar }) => {
 // =============================================
 const itemVazio = { nome: "", categoria: "eticos", laboratorio_id: "", quantidade: 1, unidade: "unidade", motivo: "esgotou" };
 const gerarIdRascunho = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
-const novoRascunho = (itens) => ({ id: gerarIdRascunho(), urgencia: "normal", observacao: "", itens: itens && itens.length ? itens : [{ ...itemVazio }] });
+const novoRascunho = (itens) => ({ id: gerarIdRascunho(), urgencia: "normal", tipoPedido: "deposito", observacao: "", itens: itens && itens.length ? itens : [{ ...itemVazio }] });
 
 // =============================================
 // ABAS DE SOLICITAÇÃO (farmácia) — várias solicitações independentes em paralelo
@@ -1867,8 +1924,9 @@ const SolicitacoesTabs = ({ farmaciaId, laboratorios, onSalvo, itensIniciais, on
 };
 
 const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnviado }) => {
-  const { urgencia, observacao, itens } = draft;
+  const { urgencia, tipoPedido = "deposito", observacao, itens } = draft;
   const setUrgencia = v => onChange({ urgencia: v });
+  const setTipoPedido = v => onChange({ tipoPedido: v });
   const setObservacao = v => onChange({ observacao: v });
   const setItens = novos => onChange({ itens: novos });
   const isMobile = useMobile();
@@ -1883,7 +1941,7 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
 
   const limparRascunho = () => {
     if (!window.confirm("Limpar os itens preenchidos nesta solicitação?")) return;
-    onChange({ urgencia: "normal", observacao: "", itens: [{ ...itemVazio }] });
+    onChange({ urgencia: "normal", tipoPedido: "deposito", observacao: "", itens: [{ ...itemVazio }] });
   };
 
   const buscarSugestoes = async (texto, index) => {
@@ -1911,7 +1969,7 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
     if (itens.some(i => !i.laboratorio_id)) { alert("Selecione o laboratório de todos os itens."); return; }
     setLoading(true);
     try {
-      const pedido = await sb("pedidos", { method: "POST", body: JSON.stringify({ farmacia_id: farmaciaId, urgencia, observacao }) });
+      const pedido = await sb("pedidos", { method: "POST", body: JSON.stringify({ farmacia_id: farmaciaId, urgencia, tipo_pedido: tipoPedido, observacao }) });
       const pedidoId = pedido[0].id;
 
       for (const item of itens) {
@@ -1935,6 +1993,7 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
     <div>
       <Card style={{ marginBottom: 20 }}>
         <Select label="Urgência do Pedido" value={urgencia} onChange={setUrgencia} options={[{ value: "normal", label: "Normal" }, { value: "urgente", label: "Urgente" }, { value: "critico", label: "Crítico" }]} />
+        <Select label="Tipo do Pedido" value={tipoPedido} onChange={setTipoPedido} options={tipoPedidoOptions} />
         <div>
           <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Observação (opcional)</label>
           <textarea value={observacao} onChange={e => setObservacao(e.target.value)} placeholder="Alguma observação geral sobre o pedido..." rows={2} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box", outline: "none" }} />
