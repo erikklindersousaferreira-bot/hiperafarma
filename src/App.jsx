@@ -640,11 +640,10 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   const [filtroFarmacia, setFiltroFarmacia] = useState("");
   const [filtroStatus, setFiltroStatus] = useState("");
   const [filtroUrgencia, setFiltroUrgencia] = useState("");
-  const [filtroSecao, setFiltroSecao] = useState("");
+  const [filtroTipoPedido, setFiltroTipoPedido] = useState("");
   const [filtroDataModo, setFiltroDataModo] = useState("todas"); // "todas" | "hoje" | "periodo"
   const [filtroDataDe, setFiltroDataDe] = useState("");
   const [filtroDataAte, setFiltroDataAte] = useState("");
-  const [pedidoIdsDaSecao, setPedidoIdsDaSecao] = useState(null);
   const [pedidoSelecionado, setPedidoSelecionado] = useState(null);
   const [itensPedido, setItensPedido] = useState([]);
   const [comentarios, setComentarios] = useState([]);
@@ -658,24 +657,6 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
 
   // Só entram no painel de Pedidos os pedidos já liberados pelo Depósito.
   const pedidosLiberados = pedidos.filter(p => p.liberado_deposito !== false);
-
-  // Busca direto por categoria (sem passar a lista de IDs de pedidos na URL): com muitos
-  // pedidos liberados, um "pedido_id=in.(...)" gigante estourava o limite de tamanho da
-  // query e falhava silenciosamente (catch vazio), deixando o filtro sempre vazio.
-  useEffect(() => {
-    if (!filtroSecao) { setPedidoIdsDaSecao(null); return; }
-    let cancelado = false;
-    (async () => {
-      try {
-        const itens = await sb(`pedido_itens?categoria=eq.${encodeURIComponent(filtroSecao)}&select=pedido_id`);
-        if (cancelado) return;
-        setPedidoIdsDaSecao(new Set(itens.map(i => i.pedido_id)));
-      } catch {
-        if (!cancelado) setPedidoIdsDaSecao(new Set());
-      }
-    })();
-    return () => { cancelado = true; };
-  }, [filtroSecao]);
 
   // Filtro por data: junto com farmácia/laboratório/seção, também precisa valer para o
   // PDF — por isso vira uma função reaproveitada tanto na lista quanto em gerarPDFLab.
@@ -714,7 +695,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     if (filtroFarmacia && p.farmacia_id !== filtroFarmacia) return false;
     if (filtroStatus && p.status !== filtroStatus) return false;
     if (filtroUrgencia && p.urgencia !== filtroUrgencia) return false;
-    if (filtroSecao && !(pedidoIdsDaSecao && pedidoIdsDaSecao.has(p.id))) return false;
+    if (filtroTipoPedido && (p.tipo_pedido || "deposito") !== filtroTipoPedido) return false;
     if (!passaFiltroData(p)) return false;
     return true;
   });
@@ -860,12 +841,13 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     const farmSel = filtroFarmacia ? farmacias.find(f => f.id === filtroFarmacia) : null;
     setLoadingPDF(true);
     try {
-      // O PDF usa os mesmos filtros de Farmácia, Seção e Data já aplicados na lista acima,
-      // combinados com o Laboratório escolhido neste modal — nunca ignora um filtro visível.
+      // O PDF usa os mesmos filtros de Farmácia, Tipo de Pedido e Data já aplicados na lista
+      // acima, combinados com o Laboratório escolhido neste modal — nunca ignora um filtro visível.
       const pendingIds = pedidos
         .filter(p => p.liberado_deposito !== false
           && (p.status === "pendente" || p.status === "em_andamento")
           && (!filtroFarmacia || p.farmacia_id === filtroFarmacia)
+          && (!filtroTipoPedido || (p.tipo_pedido || "deposito") === filtroTipoPedido)
           && passaFiltroData(p))
         .map(p => p.id);
 
@@ -876,8 +858,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
       }
 
       const filtroLab = labPDF ? `laboratorio_id=eq.${labPDF}&` : "";
-      const filtroSecaoPDF = filtroSecao ? `categoria=eq.${filtroSecao}&` : "";
-      const itens = await sb(`pedido_itens?${filtroLab}${filtroSecaoPDF}pedido_id=in.(${pendingIds.join(",")})&order=nome_laboratorio.asc,nome_produto.asc`);
+      const itens = await sb(`pedido_itens?${filtroLab}pedido_id=in.(${pendingIds.join(",")})&order=nome_laboratorio.asc,nome_produto.asc`);
 
       if (!itens.length) {
         alert(lab ? `Nenhum item pendente para o laboratório "${lab.nome}" com os filtros selecionados.` : "Nenhum item pendente ou em andamento encontrado com os filtros selecionados.");
@@ -888,12 +869,12 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
       const dataStr = new Date().toLocaleDateString("pt-BR");
       const horaStr = new Date().toLocaleString("pt-BR");
 
-      const secaoNome = filtroSecao ? categoriaLabel[filtroSecao] || filtroSecao : "";
+      const tipoNome = filtroTipoPedido ? tipoPedidoLabel[filtroTipoPedido] || filtroTipoPedido : "";
       const dataFiltroDescricao = descricaoFiltroData();
       const tituloPrincipal = [
         lab ? `Pedido ${lab.nome}` : "Pedidos",
         farmSel ? `Farmácia ${farmSel.nome}` : "Todas as Farmácias",
-        secaoNome ? `Seção ${secaoNome}` : null,
+        tipoNome ? `Tipo ${tipoNome}` : null,
         dataFiltroDescricao ? `Data ${dataFiltroDescricao}` : null,
       ].filter(Boolean).join(" — ");
 
@@ -1030,10 +1011,10 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
             </select>
           </div>
           <div style={{ flex: 1, minWidth: 140 }}>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>SEÇÃO</label>
-            <select value={filtroSecao} onChange={e => setFiltroSecao(e.target.value)} style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 13, fontFamily: "inherit", background: C.branco }}>
-              <option value="">Todas</option>
-              {categoriaOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>TIPO DE PEDIDO</label>
+            <select value={filtroTipoPedido} onChange={e => setFiltroTipoPedido(e.target.value)} style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 13, fontFamily: "inherit", background: C.branco }}>
+              <option value="">Todos</option>
+              {tipoPedidoOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
           <div style={{ flex: 1, minWidth: 220 }}>
@@ -1051,7 +1032,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
               </div>
             )}
           </div>
-          <Btn onClick={() => { setFiltroFarmacia(""); setFiltroStatus(""); setFiltroUrgencia(""); setFiltroSecao(""); setFiltroDataModo("todas"); setFiltroDataDe(""); setFiltroDataAte(""); }} outline cor={C.cinzaT} small>Limpar</Btn>
+          <Btn onClick={() => { setFiltroFarmacia(""); setFiltroStatus(""); setFiltroUrgencia(""); setFiltroTipoPedido(""); setFiltroDataModo("todas"); setFiltroDataDe(""); setFiltroDataAte(""); }} outline cor={C.cinzaT} small>Limpar</Btn>
         </div>
       </Card>
 
@@ -1186,10 +1167,10 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
             </select>
           </div>
           <div style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Seção</label>
-            <select value={filtroSecao} onChange={e => setFiltroSecao(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}>
-              <option value="">Todas as seções</option>
-              {categoriaOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Tipo de Pedido</label>
+            <select value={filtroTipoPedido} onChange={e => setFiltroTipoPedido(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}>
+              <option value="">Todos os tipos</option>
+              {tipoPedidoOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
           <div style={{ marginBottom: 16 }}>
