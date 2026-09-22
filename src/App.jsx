@@ -1017,21 +1017,6 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
               {tipoPedidoOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
-          <div style={{ flex: 1, minWidth: 220 }}>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>DATA</label>
-            <Segmented
-              small
-              options={[{ value: "todas", label: "Todas" }, { value: "hoje", label: "Hoje" }, { value: "periodo", label: "Data específica / Período" }]}
-              value={filtroDataModo}
-              onChange={setFiltroDataModo}
-            />
-            {filtroDataModo === "periodo" && (
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <input type="date" value={filtroDataDe} onChange={e => setFiltroDataDe(e.target.value)} style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 12, fontFamily: "inherit", background: C.branco, minWidth: 0 }} />
-                <input type="date" value={filtroDataAte} onChange={e => setFiltroDataAte(e.target.value)} style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 12, fontFamily: "inherit", background: C.branco, minWidth: 0 }} />
-              </div>
-            )}
-          </div>
           <Btn onClick={() => { setFiltroFarmacia(""); setFiltroStatus(""); setFiltroUrgencia(""); setFiltroTipoPedido(""); setFiltroDataModo("todas"); setFiltroDataDe(""); setFiltroDataAte(""); }} outline cor={C.cinzaT} small>Limpar</Btn>
         </div>
       </Card>
