@@ -25,6 +25,31 @@ const sb = async (path, opts = {}) => {
   return text ? JSON.parse(text) : [];
 };
 
+// Pagina uma consulta REST completa via cabeçalho Range: o PostgREST ignora um "limit" no
+// queryString maior que o max-rows configurado no servidor e corta a resposta em silêncio,
+// sem erro — por isso consultas que podem passar de ~1000 linhas (ex.: previsão de farmácias
+// com histórico grande) precisam paginar de verdade para não perder itens.
+const sbAll = async (path, pageSize = 1000) => {
+  let offset = 0;
+  let todas = [];
+  while (true) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        Range: `${offset}-${offset + pageSize - 1}`,
+      },
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const pagina = await res.json();
+    todas = todas.concat(pagina);
+    if (pagina.length < pageSize) break;
+    offset += pagina.length;
+  }
+  return todas;
+};
+
 // =============================================
 // CORES E ESTILOS
 // =============================================
@@ -2363,8 +2388,13 @@ const calcularPrevisao = (itens, diasHorizonte) => {
       ? (new Date(maisRecente.criado_em) - new Date(maisAntiga.criado_em)) / (numOcorrencias - 1) / 86400000
       : null;
     const diasDesdeUltimoPedido = (Date.now() - new Date(maisRecente.criado_em).getTime()) / 86400000;
+    // Piso de 1 dia para qualquer cálculo de taxa: pedidos do mesmo produto feitos no mesmo
+    // dia (ou minutos um do outro, ex. reenvio duplicado) davam um intervalo quase zero, e
+    // dividir por isso explodia tanto a previsão quanto a urgência para números absurdos
+    // (centenas de milhares de unidades). Isso não muda o "Intervalo médio" exibido na tela.
+    const intervaloParaTaxa = intervaloMedioDias != null ? Math.max(intervaloMedioDias, 1) : null;
     // > 1 = já passou do intervalo médio esperado entre pedidos (provável repedido)
-    const urgenciaRepedido = intervaloMedioDias ? diasDesdeUltimoPedido / intervaloMedioDias : null;
+    const urgenciaRepedido = intervaloParaTaxa ? diasDesdeUltimoPedido / intervaloParaTaxa : null;
 
     // Mediana das últimas até 6 quantidades pedidas: robusta a pedidos muito fora do padrão.
     const ultimasQtds = ordenadas.slice(0, 6).map(o => o.quantidade);
@@ -2375,7 +2405,7 @@ const calcularPrevisao = (itens, diasHorizonte) => {
     // previsão para o horizonte escolhido (15 dias / mês) em vez de repetir sempre o mesmo
     // número. Só existe quando há pelo menos 2 pedidos — com 1 único pedido não há
     // intervalo real observado, e a previsão não inventa uma taxa de consumo.
-    const consumoDiario = intervaloMedioDias && intervaloMedioDias > 0 ? medianaQtd / intervaloMedioDias : null;
+    const consumoDiario = intervaloParaTaxa ? medianaQtd / intervaloParaTaxa : null;
     const temHistoricoSuficiente = consumoDiario != null;
     const previsaoQuantidade = temHistoricoSuficiente
       ? Math.max(0, Math.round(consumoDiario * diasHorizonte))
@@ -2403,6 +2433,14 @@ const calcularPrevisao = (itens, diasHorizonte) => {
   return [...comHistoricoRegular, ...semHistoricoRegular];
 };
 
+// "0d" enganava quando o intervalo real era uma fração de dia (pedidos no mesmo dia) —
+// deixa claro que houve pedidos repetidos no mesmo dia sem arredondar para zero.
+const formatarIntervalo = (dias) => {
+  if (dias == null) return "—";
+  if (dias > 0 && dias < 1) return "<1d";
+  return `${Math.round(dias)}d`;
+};
+
 const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
   const [farmaciaSel, setFarmaciaSel] = useState(isDono ? "" : farmaciaId);
   const [laboratorioSel, setLaboratorioSel] = useState("");
@@ -2423,10 +2461,12 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
     const carregarPrevisao = async () => {
       setLoading(true);
       try {
-        let query = `pedido_itens?select=nome_produto,categoria,laboratorio_id,nome_laboratorio,quantidade,criado_em,pedidos!inner(farmacia_id)&pedidos.farmacia_id=eq.${farmaciaAtivaId}&order=criado_em.desc&limit=3000`;
+        let query = `pedido_itens?select=nome_produto,categoria,laboratorio_id,nome_laboratorio,quantidade,criado_em,pedidos!inner(farmacia_id)&pedidos.farmacia_id=eq.${farmaciaAtivaId}&order=criado_em.desc`;
         if (laboratorioSel) query += `&laboratorio_id=eq.${laboratorioSel}`;
         if (secaoSel) query += `&categoria=eq.${secaoSel}`;
-        const itens = await sb(query);
+        // Farmácias com histórico grande passam facilmente de 1000 itens — precisa paginar
+        // de verdade (sbAll) para não deixar produtos de fora da previsão silenciosamente.
+        const itens = await sbAll(query);
         const { dias } = calcularPeriodoPrevisao(periodoPrevisao);
         setDados(calcularPrevisao(itens, dias));
       } catch (e) {
@@ -2453,7 +2493,7 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
         <td>${escHtml(categoriaLabel[d.categoria] || d.categoria || "—")}</td>
         <td>${escHtml(d.laboratorioNome || "—")}</td>
         <td style="text-align:center">${d.numOcorrencias}</td>
-        <td style="text-align:center">${d.intervaloMedioDias ? Math.round(d.intervaloMedioDias) + "d" : "—"}</td>
+        <td style="text-align:center">${formatarIntervalo(d.intervaloMedioDias)}</td>
         <td style="text-align:center;font-weight:700;color:#1A3A8F">${d.previsaoQuantidade}${d.temHistoricoSuficiente ? "" : "*"}</td>
       </tr>`).join("");
 
@@ -2600,7 +2640,7 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
                       <td style={{ padding: "10px 16px" }}><Badge label={categoriaLabel[d.categoria] || d.categoria || "—"} cor={categoriaCor[d.categoria] || C.cinzaT} /></td>
                       <td style={{ padding: "10px 16px", fontSize: 13, color: C.cinzaP }}>{d.laboratorioNome || "—"}</td>
                       <td style={{ padding: "10px 16px", textAlign: "center", fontSize: 13, color: C.cinzaP }}>{d.numOcorrencias}</td>
-                      <td style={{ padding: "10px 16px", textAlign: "center", fontSize: 13, color: C.cinzaP }}>{d.intervaloMedioDias ? `${Math.round(d.intervaloMedioDias)}d` : "—"}</td>
+                      <td style={{ padding: "10px 16px", textAlign: "center", fontSize: 13, color: C.cinzaP }}>{formatarIntervalo(d.intervaloMedioDias)}</td>
                       <td style={{ padding: "10px 16px", textAlign: "center" }}>
                         <span style={{ fontWeight: 700, color: C.azul, background: C.azul + "15", padding: "4px 12px", borderRadius: 8 }}>{d.previsaoQuantidade} un.</span>
                         {!d.temHistoricoSuficiente && (
