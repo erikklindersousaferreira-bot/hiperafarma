@@ -220,6 +220,71 @@ const Segmented = ({ options, value, onChange, small = false }) => (
   </div>
 );
 
+// Campo de Laboratório pesquisável: parece um <select> normal (mostra o nome escolhido),
+// mas ao focar vira uma busca com lupa discreta — útil com a lista de laboratórios grande.
+const ComboboxLaboratorio = ({ value, onChange, laboratorios, small = false, placeholder = "Todos os laboratórios" }) => {
+  const [busca, setBusca] = useState("");
+  const [aberto, setAberto] = useState(false);
+
+  const labSelecionado = value ? laboratorios.find(l => l.id === value) : null;
+  const buscaNormalizada = busca.trim().toLowerCase();
+  const filtrados = buscaNormalizada ? laboratorios.filter(l => l.nome.toLowerCase().includes(buscaNormalizada)) : laboratorios;
+
+  const selecionar = (lab) => {
+    onChange(lab ? lab.id : "");
+    setBusca("");
+    setAberto(false);
+  };
+
+  const inputStyle = {
+    width: "100%",
+    padding: small ? "8px 12px 8px 32px" : "10px 14px 10px 38px",
+    borderRadius: small ? 8 : 10,
+    border: `1.5px solid ${C.cinzaD}`,
+    fontSize: small ? 13 : 14,
+    fontFamily: "inherit",
+    background: C.branco,
+    color: C.preto,
+    boxSizing: "border-box",
+    outline: "none",
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <div style={{ position: "absolute", left: small ? 10 : 14, top: "50%", transform: "translateY(-50%)", display: "flex", pointerEvents: "none" }}>
+        <Icon name="lupa" size={small ? 13 : 15} color={C.cinzaT} />
+      </div>
+      <input
+        value={aberto ? busca : (labSelecionado ? labSelecionado.nome : "")}
+        onChange={e => { setBusca(e.target.value); if (!aberto) setAberto(true); }}
+        onFocus={() => { setBusca(""); setAberto(true); }}
+        onBlur={() => setTimeout(() => setAberto(false), 150)}
+        placeholder={placeholder}
+        style={inputStyle}
+      />
+      {aberto && (
+        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, background: C.branco, border: `1.5px solid ${C.cinzaD}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(15,23,42,0.14)", maxHeight: 220, overflowY: "auto", zIndex: 30 }}>
+          <div onMouseDown={e => e.preventDefault()} onClick={() => selecionar(null)} style={{ padding: "9px 14px", cursor: "pointer", fontSize: small ? 13 : 14, color: C.cinzaT, borderBottom: `1px solid ${C.cinzaE}` }}>
+            {placeholder}
+          </div>
+          {filtrados.length === 0 ? (
+            <div style={{ padding: "10px 14px", fontSize: 13, color: C.cinzaT }}>Nenhum laboratório encontrado.</div>
+          ) : filtrados.map(l => (
+            <div
+              key={l.id}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => selecionar(l)}
+              style={{ padding: "9px 14px", cursor: "pointer", fontSize: small ? 13 : 14, color: C.preto, background: l.id === value ? C.cinzaF : "transparent" }}
+            >
+              {l.nome}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // Mostra a quantidade de um item de pedido junto da unidade (caixa/unidade), quando
 // essa informação existir. Itens antigos sem unidade registrada mostram só a quantidade.
 const QtdUnidade = ({ quantidade, unidade, align = "flex-end" }) => (
@@ -1239,10 +1304,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
           </div>
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Laboratório (opcional)</label>
-            <select value={labPDF} onChange={e => setLabPDF(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}>
-              <option value="">Todos os laboratórios</option>
-              {laboratorios.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
-            </select>
+            <ComboboxLaboratorio value={labPDF} onChange={setLabPDF} laboratorios={laboratorios} placeholder="Todos os laboratórios" />
           </div>
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
             <Btn onClick={gerarPDFLab} cor={C.vermelho} disabled={loadingPDF} full>
@@ -2618,10 +2680,7 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
           )}
           <div style={{ flex: 1, minWidth: 160 }}>
             <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>LABORATÓRIO</label>
-            <select value={laboratorioSel} onChange={e => setLaboratorioSel(e.target.value)} style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 13, fontFamily: "inherit", background: C.branco }}>
-              <option value="">Todos</option>
-              {laboratorios.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
-            </select>
+            <ComboboxLaboratorio value={laboratorioSel} onChange={setLaboratorioSel} laboratorios={laboratorios} small placeholder="Todos" />
           </div>
           <div style={{ flex: 1, minWidth: 160 }}>
             <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>SEÇÃO</label>
