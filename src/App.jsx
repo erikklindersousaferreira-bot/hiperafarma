@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef, createContext, useContext } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from "react";
+import { ResponsiveContainer, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, LabelList } from "recharts";
 
 // =============================================
 // CONFIGURAÇÃO SUPABASE
@@ -666,6 +667,8 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
   const [filtroStatus, setFiltroStatus] = useState("");
   const [filtroUrgencia, setFiltroUrgencia] = useState("");
   const [filtroTipoPedido, setFiltroTipoPedido] = useState("");
+  const [filtroSecao, setFiltroSecao] = useState("");
+  const [pedidoIdsDaSecao, setPedidoIdsDaSecao] = useState(null);
   const [filtroDataModo, setFiltroDataModo] = useState("todas"); // "todas" | "hoje" | "periodo"
   const [filtroDataDe, setFiltroDataDe] = useState("");
   const [filtroDataAte, setFiltroDataAte] = useState("");
@@ -682,6 +685,24 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
 
   // Só entram no painel de Pedidos os pedidos já liberados pelo Depósito.
   const pedidosLiberados = pedidos.filter(p => p.liberado_deposito !== false);
+
+  // Busca direto por categoria (sem passar a lista de IDs de pedidos na URL): com muitos
+  // pedidos liberados, um "pedido_id=in.(...)" gigante estourava o limite de tamanho da
+  // query e falhava silenciosamente (catch vazio), deixando o filtro sempre vazio.
+  useEffect(() => {
+    if (!filtroSecao) { setPedidoIdsDaSecao(null); return; }
+    let cancelado = false;
+    (async () => {
+      try {
+        const itens = await sb(`pedido_itens?categoria=eq.${encodeURIComponent(filtroSecao)}&select=pedido_id`);
+        if (cancelado) return;
+        setPedidoIdsDaSecao(new Set(itens.map(i => i.pedido_id)));
+      } catch {
+        if (!cancelado) setPedidoIdsDaSecao(new Set());
+      }
+    })();
+    return () => { cancelado = true; };
+  }, [filtroSecao]);
 
   // Filtro por data: junto com farmácia/laboratório/seção, também precisa valer para o
   // PDF — por isso vira uma função reaproveitada tanto na lista quanto em gerarPDFLab.
@@ -721,6 +742,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     if (filtroStatus && p.status !== filtroStatus) return false;
     if (filtroUrgencia && p.urgencia !== filtroUrgencia) return false;
     if (filtroTipoPedido && (p.tipo_pedido || "deposito") !== filtroTipoPedido) return false;
+    if (filtroSecao && !(pedidoIdsDaSecao && pedidoIdsDaSecao.has(p.id))) return false;
     if (!passaFiltroData(p)) return false;
     return true;
   });
@@ -883,7 +905,8 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
       }
 
       const filtroLab = labPDF ? `laboratorio_id=eq.${labPDF}&` : "";
-      const itens = await sb(`pedido_itens?${filtroLab}pedido_id=in.(${pendingIds.join(",")})&order=nome_laboratorio.asc,nome_produto.asc`);
+      const filtroSecaoPDF = filtroSecao ? `categoria=eq.${filtroSecao}&` : "";
+      const itens = await sb(`pedido_itens?${filtroLab}${filtroSecaoPDF}pedido_id=in.(${pendingIds.join(",")})&order=nome_laboratorio.asc,nome_produto.asc`);
 
       if (!itens.length) {
         alert(lab ? `Nenhum item pendente para o laboratório "${lab.nome}" com os filtros selecionados.` : "Nenhum item pendente ou em andamento encontrado com os filtros selecionados.");
@@ -895,11 +918,13 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
       const horaStr = new Date().toLocaleString("pt-BR");
 
       const tipoNome = filtroTipoPedido ? tipoPedidoLabel[filtroTipoPedido] || filtroTipoPedido : "";
+      const secaoNome = filtroSecao ? categoriaLabel[filtroSecao] || filtroSecao : "";
       const dataFiltroDescricao = descricaoFiltroData();
       const tituloPrincipal = [
         lab ? `Pedido ${lab.nome}` : "Pedidos",
         farmSel ? `Farmácia ${farmSel.nome}` : "Todas as Farmácias",
         tipoNome ? `Tipo ${tipoNome}` : null,
+        secaoNome ? `Seção ${secaoNome}` : null,
         dataFiltroDescricao ? `Data ${dataFiltroDescricao}` : null,
       ].filter(Boolean).join(" — ");
 
@@ -1042,7 +1067,14 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
               {tipoPedidoOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
-          <Btn onClick={() => { setFiltroFarmacia(""); setFiltroStatus(""); setFiltroUrgencia(""); setFiltroTipoPedido(""); setFiltroDataModo("todas"); setFiltroDataDe(""); setFiltroDataAte(""); }} outline cor={C.cinzaT} small>Limpar</Btn>
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>SEÇÃO</label>
+            <select value={filtroSecao} onChange={e => setFiltroSecao(e.target.value)} style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 13, fontFamily: "inherit", background: C.branco }}>
+              <option value="">Todas</option>
+              {categoriaOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <Btn onClick={() => { setFiltroFarmacia(""); setFiltroStatus(""); setFiltroUrgencia(""); setFiltroTipoPedido(""); setFiltroSecao(""); setFiltroDataModo("todas"); setFiltroDataDe(""); setFiltroDataAte(""); }} outline cor={C.cinzaT} small>Limpar</Btn>
         </div>
       </Card>
 
@@ -1181,6 +1213,13 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
             <select value={filtroTipoPedido} onChange={e => setFiltroTipoPedido(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}>
               <option value="">Todos os tipos</option>
               {tipoPedidoOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Seção</label>
+            <select value={filtroSecao} onChange={e => setFiltroSecao(e.target.value)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" }}>
+              <option value="">Todas as seções</option>
+              {categoriaOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
           <div style={{ marginBottom: 16 }}>
@@ -2662,6 +2701,468 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
 };
 
 // =============================================
+// RELATÓRIOS (dono) — demanda por produto/laboratório/seção
+// =============================================
+const periodoRelatorioOptions = [
+  { value: "hoje", label: "Hoje" },
+  { value: "7dias", label: "7d" },
+  { value: "30dias", label: "30d" },
+  { value: "mes", label: "Mês" },
+  { value: "personalizado", label: "Outro" },
+];
+
+const formatarDataBRRel = (isoDateStr) => {
+  const [y, m, d] = isoDateStr.split("-");
+  return `${d}/${m}/${y}`;
+};
+
+// Sempre um intervalo [inicio, fim) em limites de dia local — "fim" é exclusivo (meia-noite
+// do dia seguinte ao último dia incluído), para bater exatamente com o que aparece na tela.
+const calcularPeriodoRelatorio = (periodo, dataDe, dataAte, base = new Date()) => {
+  const hoje = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  const amanha = new Date(hoje); amanha.setDate(amanha.getDate() + 1);
+  if (periodo === "7dias") {
+    const inicio = new Date(hoje); inicio.setDate(inicio.getDate() - 6);
+    return { inicio, fim: amanha, label: "Últimos 7 dias" };
+  }
+  if (periodo === "30dias") {
+    const inicio = new Date(hoje); inicio.setDate(inicio.getDate() - 29);
+    return { inicio, fim: amanha, label: "Últimos 30 dias" };
+  }
+  if (periodo === "mes") {
+    const inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+    const fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1);
+    return { inicio, fim, label: "Este mês" };
+  }
+  if (periodo === "personalizado") {
+    if (!dataDe) return { inicio: hoje, fim: amanha, label: "Hoje" };
+    const inicio = new Date(`${dataDe}T00:00:00`);
+    const fim = new Date(`${dataAte || dataDe}T00:00:00`); fim.setDate(fim.getDate() + 1);
+    const label = dataAte && dataAte !== dataDe ? `${formatarDataBRRel(dataDe)} até ${formatarDataBRRel(dataAte)}` : formatarDataBRRel(dataDe);
+    return { inicio, fim, label };
+  }
+  return { inicio: hoje, fim: amanha, label: "Hoje" };
+};
+
+const relatorioTooltipStyle = { background: C.branco, border: `1px solid ${C.cinzaE}`, borderRadius: 10, fontSize: 12, padding: "8px 12px", boxShadow: "0 4px 16px rgba(15,23,42,0.12)" };
+
+// Barra horizontal única (uma cor por gráfico — é um ranking por magnitude, não por categoria).
+const GraficoRanking = ({ dados, cor, unidade = "un." }) => {
+  const isMobile = useMobile();
+  if (!dados.length) return <p style={{ color: C.cinzaT, textAlign: "center", padding: "24px 0", margin: 0 }}>Sem dados no período.</p>;
+  const altura = Math.max(dados.length * 38, 60);
+  return (
+    <ResponsiveContainer width="100%" height={altura}>
+      <BarChart data={dados} layout="vertical" margin={{ top: 4, right: isMobile ? 36 : 44, left: 4, bottom: 4 }}>
+        <XAxis type="number" hide />
+        <YAxis type="category" dataKey="nome" width={isMobile ? 110 : 150} tick={{ fontSize: 12, fill: C.cinzaP }} axisLine={false} tickLine={false} />
+        <Tooltip cursor={{ fill: C.cinzaF }} contentStyle={relatorioTooltipStyle} labelStyle={{ color: C.preto, fontWeight: 700, marginBottom: 4 }} formatter={(v) => [`${v} ${unidade}`, "Quantidade"]} />
+        <Bar dataKey="quantidade" fill={cor} radius={[0, 4, 4, 0]} barSize={18} maxBarSize={20}>
+          <LabelList dataKey="quantidade" position="right" style={{ fontSize: 12, fontWeight: 700, fill: C.preto }} />
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+};
+
+const Relatorios = ({ farmacias }) => {
+  const isMobile = useMobile();
+  const [periodo, setPeriodo] = useState("hoje");
+  const [dataDe, setDataDe] = useState("");
+  const [dataAte, setDataAte] = useState("");
+  const [farmaciaSel, setFarmaciaSel] = useState("");
+  const [itens, setItens] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [pdfHtml, setPdfHtml] = useState(null);
+
+  const periodoInfo = calcularPeriodoRelatorio(periodo, dataDe, dataAte);
+
+  useEffect(() => {
+    if (periodo === "personalizado" && !dataDe) { setItens([]); setLoading(false); return; }
+    let cancelado = false;
+    setLoading(true);
+    (async () => {
+      try {
+        let query = `pedido_itens?select=nome_produto,categoria,nome_laboratorio,quantidade,criado_em,pedido_id,pedidos!inner(farmacia_id,status,urgencia)`
+          + `&criado_em=gte.${periodoInfo.inicio.toISOString()}&criado_em=lt.${periodoInfo.fim.toISOString()}&order=criado_em.asc`;
+        if (farmaciaSel) query += `&pedidos.farmacia_id=eq.${farmaciaSel}`;
+        const dados = await sbAll(query);
+        if (!cancelado) setItens(dados);
+      } catch (e) {
+        console.error(e);
+        if (!cancelado) setItens([]);
+      }
+      if (!cancelado) setLoading(false);
+    })();
+    return () => { cancelado = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodo, dataDe, dataAte, farmaciaSel]);
+
+  const pedidosUnicos = useMemo(() => {
+    const mapa = new Map();
+    itens.forEach(item => { if (!mapa.has(item.pedido_id)) mapa.set(item.pedido_id, item.pedidos); });
+    return [...mapa.values()];
+  }, [itens]);
+
+  const topProdutos = useMemo(() => {
+    const mapa = new Map();
+    itens.forEach(item => {
+      if (!mapa.has(item.nome_produto)) mapa.set(item.nome_produto, { nome: item.nome_produto, categoria: item.categoria, laboratorio: item.nome_laboratorio || "—", quantidade: 0, ocorrencias: 0 });
+      const g = mapa.get(item.nome_produto);
+      g.quantidade += Number(item.quantidade) || 0;
+      g.ocorrencias += 1;
+    });
+    return [...mapa.values()].sort((a, b) => b.quantidade - a.quantidade).slice(0, 8);
+  }, [itens]);
+
+  const topLaboratorios = useMemo(() => {
+    const mapa = new Map();
+    itens.forEach(item => {
+      const key = item.nome_laboratorio || "Sem laboratório";
+      if (!mapa.has(key)) mapa.set(key, { nome: key, quantidade: 0, ocorrencias: 0 });
+      const g = mapa.get(key);
+      g.quantidade += Number(item.quantidade) || 0;
+      g.ocorrencias += 1;
+    });
+    return [...mapa.values()].sort((a, b) => b.quantidade - a.quantidade).slice(0, 8);
+  }, [itens]);
+
+  const distribuicaoSecao = useMemo(() => {
+    const mapa = new Map();
+    let total = 0;
+    itens.forEach(item => {
+      const qtd = Number(item.quantidade) || 0;
+      total += qtd;
+      const key = item.categoria || "outros";
+      if (!mapa.has(key)) mapa.set(key, 0);
+      mapa.set(key, mapa.get(key) + qtd);
+    });
+    const lista = [...mapa.entries()].map(([categoria, quantidade]) => ({ categoria, quantidade })).sort((a, b) => b.quantidade - a.quantidade);
+    const top = lista.slice(0, 6);
+    const outras = lista.slice(6).reduce((s, x) => s + x.quantidade, 0);
+    const resultado = top.map(x => ({ nome: categoriaLabel[x.categoria] || x.categoria, categoria: x.categoria, quantidade: x.quantidade, pct: total ? (x.quantidade / total * 100) : 0 }));
+    if (outras > 0) resultado.push({ nome: "Outras seções", categoria: null, quantidade: outras, pct: total ? (outras / total * 100) : 0 });
+    return resultado;
+  }, [itens]);
+
+  const pedidosPorFarmacia = useMemo(() => {
+    const mapa = new Map();
+    pedidosUnicos.forEach(p => {
+      const fid = p?.farmacia_id;
+      if (!fid) return;
+      mapa.set(fid, (mapa.get(fid) || 0) + 1);
+    });
+    return [...mapa.entries()]
+      .map(([fid, count]) => ({ nome: farmacias.find(f => f.id === fid)?.nome || "—", quantidade: count }))
+      .sort((a, b) => b.quantidade - a.quantidade)
+      .slice(0, 10);
+  }, [pedidosUnicos, farmacias]);
+
+  const pedidosPorDia = useMemo(() => {
+    const mapa = new Map();
+    itens.forEach(item => {
+      const d = new Date(item.criado_em);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      if (!mapa.has(key)) mapa.set(key, new Set());
+      mapa.get(key).add(item.pedido_id);
+    });
+    return [...mapa.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([key, set]) => {
+      const [, m, dd] = key.split("-");
+      return { dia: `${dd}/${m}`, pedidos: set.size };
+    });
+  }, [itens]);
+
+  const statusBreakdown = useMemo(() => {
+    const mapa = new Map();
+    pedidosUnicos.forEach(p => { const s = p?.status || "pendente"; mapa.set(s, (mapa.get(s) || 0) + 1); });
+    return [...mapa.entries()];
+  }, [pedidosUnicos]);
+
+  const urgenciaBreakdown = useMemo(() => {
+    const mapa = new Map();
+    pedidosUnicos.forEach(p => { const u = p?.urgencia || "normal"; mapa.set(u, (mapa.get(u) || 0) + 1); });
+    return [...mapa.entries()];
+  }, [pedidosUnicos]);
+
+  const totalPedidos = pedidosUnicos.length;
+  const totalItens = itens.length;
+  const mediaItensPorPedido = totalPedidos ? (totalItens / totalPedidos).toFixed(1) : "0";
+  const farmaciaMaisAtiva = pedidosPorFarmacia[0];
+  const produtoMaisPedido = topProdutos[0];
+  const laboratorioMaisPedido = topLaboratorios[0];
+
+  const kpis = [
+    { label: "Pedidos no período", valor: totalPedidos, icon: "pedidos", cor: C.azul },
+    { label: "Itens pedidos", valor: totalItens, icon: "grafico", cor: C.azulClaro },
+    { label: "Farmácia mais ativa", valor: farmaciaMaisAtiva?.nome || "—", sub: farmaciaMaisAtiva ? `${farmaciaMaisAtiva.quantidade} pedidos` : null, icon: "farmacias", cor: C.verde },
+    { label: "Produto mais pedido", valor: produtoMaisPedido?.nome || "—", sub: produtoMaisPedido ? `${produtoMaisPedido.quantidade} un.` : null, icon: "previsao", cor: C.laranja },
+    { label: "Laboratório mais pedido", valor: laboratorioMaisPedido?.nome || "—", sub: laboratorioMaisPedido ? `${laboratorioMaisPedido.quantidade} un.` : null, icon: "laboratorio", cor: "#7C3AED" },
+    { label: "Itens por pedido (média)", valor: mediaItensPorPedido, icon: "home", cor: C.amarelo },
+  ];
+
+  const gerarPDFRelatorio = () => {
+    if (!itens.length) return;
+    const dataStr = new Date().toLocaleDateString("pt-BR");
+    const horaStr = new Date().toLocaleString("pt-BR");
+    const farmNome = farmaciaSel ? (farmacias.find(f => f.id === farmaciaSel)?.nome || "—") : "Todas as Farmácias";
+
+    const linhaTop = (d, i, unidadeLbl) => `<tr>
+        <td>${i + 1}</td>
+        <td><strong>${escHtml(d.nome)}</strong></td>
+        <td>${escHtml(categoriaLabel[d.categoria] || d.categoria || "—")}</td>
+        <td>${escHtml(d.laboratorio || "—")}</td>
+        <td style="text-align:center">${d.ocorrencias}</td>
+        <td style="text-align:center;font-weight:700;color:#1A3A8F">${d.quantidade} ${unidadeLbl}</td>
+      </tr>`;
+
+    const linhaLab = (d, i) => `<tr>
+        <td>${i + 1}</td>
+        <td><strong>${escHtml(d.nome)}</strong></td>
+        <td style="text-align:center">${d.ocorrencias}</td>
+        <td style="text-align:center;font-weight:700;color:#1A3A8F">${d.quantidade} un.</td>
+      </tr>`;
+
+    const linhaSecao = (d) => `<tr>
+        <td><strong>${escHtml(d.nome)}</strong></td>
+        <td style="text-align:center">${d.quantidade} un.</td>
+        <td style="text-align:center">${d.pct.toFixed(1)}%</td>
+      </tr>`;
+
+    const linhaFarm = (d, i) => `<tr>
+        <td>${i + 1}</td>
+        <td><strong>${escHtml(d.nome)}</strong></td>
+        <td style="text-align:center;font-weight:700;color:#1A3A8F">${d.quantidade}</td>
+      </tr>`;
+
+    const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Relatório Gerencial — ${dataStr}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; padding: 40px; color: #0F172A; font-size: 13px; }
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 3px solid #1A3A8F; }
+    .header img { width: 180px; height: auto; }
+    .header-right { text-align: right; }
+    .tag { display: inline-block; background: #F5A800; color: #1A3A8F; font-weight: 800; font-size: 11px; letter-spacing: 0.5px; padding: 4px 10px; border-radius: 20px; margin-bottom: 6px; }
+    .farm-name { font-size: 20px; font-weight: 800; color: #1A3A8F; margin-bottom: 4px; }
+    .date { color: #6B7A99; font-size: 12px; }
+    .kpis { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0 28px; }
+    .kpi { flex: 1; min-width: 140px; background: #F4F6FA; border-radius: 10px; padding: 12px 14px; }
+    .kpi .v { font-size: 18px; font-weight: 800; color: #1A3A8F; }
+    .kpi .l { font-size: 11px; color: #6B7A99; margin-top: 2px; }
+    h2 { font-size: 15px; font-weight: 700; color: #374151; margin: 28px 0 12px; }
+    h2:first-of-type { margin-top: 0; }
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { background: #1A3A8F; color: #FFFFFF; }
+    th { padding: 8px 14px; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
+    td { padding: 8px 14px; border-bottom: 1px solid #E8ECF4; }
+    tr:nth-child(even) td { background: #F4F6FA; }
+    tr { page-break-inside: avoid; break-inside: avoid; }
+    .footer { margin-top: 40px; font-size: 10px; color: #6B7A99; text-align: center; border-top: 1px solid #E8ECF4; padding-top: 16px; }
+    @media print { body { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="https://i.postimg.cc/pVwVTC9j/LOGO-VERTICALL-EM-PNG.png" alt="Hiperafarma" onerror="this.style.display='none'">
+    <div class="header-right">
+      <div class="tag">RELATÓRIO GERENCIAL</div>
+      <div class="farm-name">${escHtml(farmNome)}</div>
+      <div class="date">Período: ${escHtml(periodoInfo.label)}</div>
+      <div class="date">Gerado em: ${dataStr}</div>
+    </div>
+  </div>
+
+  <div class="kpis">
+    ${kpis.map(k => `<div class="kpi"><div class="v">${escHtml(String(k.valor))}</div><div class="l">${escHtml(k.label)}${k.sub ? ` — ${escHtml(k.sub)}` : ""}</div></div>`).join("")}
+  </div>
+
+  <h2>Produtos Mais Pedidos</h2>
+  <table>
+    <thead><tr><th>#</th><th>Produto</th><th>Seção</th><th>Laboratório</th><th>Nº pedidos</th><th>Qtd. total</th></tr></thead>
+    <tbody>${topProdutos.map((d, i) => linhaTop(d, i, "un.")).join("")}</tbody>
+  </table>
+
+  <h2>Ranking de Laboratórios</h2>
+  <table>
+    <thead><tr><th>#</th><th>Laboratório</th><th>Nº itens</th><th>Qtd. total</th></tr></thead>
+    <tbody>${topLaboratorios.map((d, i) => linhaLab(d, i)).join("")}</tbody>
+  </table>
+
+  <h2>Distribuição por Seção</h2>
+  <table>
+    <thead><tr><th>Seção</th><th>Qtd. total</th><th>% do total</th></tr></thead>
+    <tbody>${distribuicaoSecao.map(d => linhaSecao(d)).join("")}</tbody>
+  </table>
+
+  ${pedidosPorFarmacia.length ? `<h2>Pedidos por Farmácia</h2>
+  <table>
+    <thead><tr><th>#</th><th>Farmácia</th><th>Nº pedidos</th></tr></thead>
+    <tbody>${pedidosPorFarmacia.map((d, i) => linhaFarm(d, i)).join("")}</tbody>
+  </table>` : ""}
+
+  <div class="footer">Hiperafarma Drogarias — Gerado em ${horaStr} — Documento de uso interno, sujeito a revisão manual</div>
+  <script>window.onload = function() { window.print(); }</script>
+</body>
+</html>`;
+
+    setPdfHtml(html);
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Relatórios</h2>
+          <p style={{ margin: 0, color: C.cinzaT, fontSize: 14 }}>Demanda por produto, laboratório e seção — {periodoInfo.label.toLowerCase()}</p>
+        </div>
+        <Btn onClick={gerarPDFRelatorio} cor={C.vermelho} disabled={!itens.length}>
+          <Icon name="pdf" size={16} color={C.branco} /> Imprimir Relatório
+        </Btn>
+      </div>
+
+      <Card style={{ marginBottom: 20, padding: 16 }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ flex: isMobile ? "1 1 100%" : 2, minWidth: 260 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>PERÍODO</label>
+            <Segmented options={periodoRelatorioOptions} value={periodo} onChange={setPeriodo} small />
+          </div>
+          {periodo === "personalizado" && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <input type="date" value={dataDe} onChange={e => setDataDe(e.target.value)} style={{ padding: "7px 10px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 12, fontFamily: "inherit", background: C.branco }} />
+              <input type="date" value={dataAte} onChange={e => setDataAte(e.target.value)} style={{ padding: "7px 10px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 12, fontFamily: "inherit", background: C.branco }} />
+            </div>
+          )}
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.cinzaT, marginBottom: 6 }}>FARMÁCIA</label>
+            <select value={farmaciaSel} onChange={e => setFarmaciaSel(e.target.value)} style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: `1.5px solid ${C.cinzaD}`, fontSize: 13, fontFamily: "inherit", background: C.branco }}>
+              <option value="">Todas as farmácias</option>
+              {farmacias.filter(f => f.usuario !== "admin" && f.ativa !== false).map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
+            </select>
+          </div>
+          {farmaciaSel && (
+            <Btn onClick={() => setFarmaciaSel("")} outline cor={C.cinzaT} small>Limpar</Btn>
+          )}
+        </div>
+      </Card>
+
+      {loading ? (
+        <p style={{ color: C.cinzaT }}>Calculando relatório...</p>
+      ) : !itens.length ? (
+        <Card><p style={{ color: C.cinzaT, textAlign: "center", margin: 0 }}>Nenhum pedido encontrado no período selecionado.</p></Card>
+      ) : (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(180px, 1fr))", gap: isMobile ? 10 : 16, marginBottom: 20 }}>
+            {kpis.map(k => (
+              <Card key={k.label} style={{ borderTop: `4px solid ${k.cor}`, padding: 18 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <div style={{ width: 34, height: 34, background: k.cor + "20", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <Icon name={k.icon} size={16} color={k.cor} />
+                  </div>
+                </div>
+                <div style={{ fontSize: typeof k.valor === "number" ? 26 : 16, fontWeight: 800, color: C.preto, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={String(k.valor)}>{k.valor}</div>
+                <div style={{ fontSize: 11, color: C.cinzaT, marginTop: 4 }}>{k.label}{k.sub ? ` · ${k.sub}` : ""}</div>
+              </Card>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
+            <Card>
+              <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, color: C.preto }}>Produtos Mais Pedidos</h3>
+              <p style={{ margin: "0 0 12px", fontSize: 12, color: C.cinzaT }}>Top 8 por quantidade total</p>
+              <GraficoRanking dados={topProdutos} cor={C.azul} />
+            </Card>
+
+            <Card>
+              <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, color: C.preto }}>Ranking de Laboratórios</h3>
+              <p style={{ margin: "0 0 12px", fontSize: 12, color: C.cinzaT }}>Top 8 por quantidade total</p>
+              <GraficoRanking dados={topLaboratorios} cor={C.laranja} />
+            </Card>
+
+            <Card>
+              <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, color: C.preto }}>Distribuição por Seção</h3>
+              <p style={{ margin: "0 0 12px", fontSize: 12, color: C.cinzaT }}>Participação de cada seção no volume pedido</p>
+              <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+                <ResponsiveContainer width={isMobile ? "100%" : 180} height={180}>
+                  <PieChart>
+                    <Pie data={distribuicaoSecao} dataKey="quantidade" nameKey="nome" innerRadius="55%" outerRadius="85%" paddingAngle={2} strokeWidth={2} stroke={C.branco}>
+                      {distribuicaoSecao.map(d => <Cell key={d.nome} fill={d.categoria ? (categoriaCor[d.categoria] || C.cinzaT) : C.cinzaT} />)}
+                    </Pie>
+                    <Tooltip contentStyle={relatorioTooltipStyle} formatter={(v, n, p) => [`${v} un. (${p.payload.pct.toFixed(1)}%)`, n]} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={{ flex: 1, minWidth: 160, display: "flex", flexDirection: "column", gap: 6 }}>
+                  {distribuicaoSecao.map(d => (
+                    <div key={d.nome} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: d.categoria ? (categoriaCor[d.categoria] || C.cinzaT) : C.cinzaT, flexShrink: 0 }} />
+                      <span style={{ color: C.cinzaP, flex: 1 }}>{d.nome}</span>
+                      <span style={{ color: C.cinzaT, fontWeight: 700 }}>{d.pct.toFixed(0)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+
+            {!farmaciaSel && pedidosPorFarmacia.length > 1 && (
+              <Card>
+                <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, color: C.preto }}>Pedidos por Farmácia</h3>
+                <p style={{ margin: "0 0 12px", fontSize: 12, color: C.cinzaT }}>Nº de pedidos no período</p>
+                <GraficoRanking dados={pedidosPorFarmacia} cor={C.verde} unidade="pedidos" />
+              </Card>
+            )}
+
+            {pedidosPorDia.length > 1 && (
+              <Card style={{ gridColumn: isMobile ? "auto" : "1 / -1" }}>
+                <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, color: C.preto }}>Evolução de Pedidos</h3>
+                <p style={{ margin: "0 0 12px", fontSize: 12, color: C.cinzaT }}>Nº de pedidos por dia</p>
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={pedidosPorDia} margin={{ top: 8, right: 16, left: -12, bottom: 4 }}>
+                    <CartesianGrid vertical={false} stroke={C.cinzaE} strokeDasharray="3 3" />
+                    <XAxis dataKey="dia" tick={{ fontSize: 11, fill: C.cinzaT }} axisLine={{ stroke: C.cinzaD }} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: C.cinzaT }} axisLine={false} tickLine={false} width={28} />
+                    <Tooltip contentStyle={relatorioTooltipStyle} labelStyle={{ color: C.preto, fontWeight: 700 }} formatter={(v) => [v, "Pedidos"]} />
+                    <Line type="monotone" dataKey="pedidos" stroke={C.azul} strokeWidth={2} dot={{ r: 3, fill: C.azul }} activeDot={{ r: 5 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </Card>
+            )}
+          </div>
+
+          {(statusBreakdown.length > 0 || urgenciaBreakdown.length > 0) && (
+            <Card>
+              <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700, color: C.preto }}>Status e Urgência dos Pedidos</h3>
+              <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {statusBreakdown.map(([s, count]) => (
+                    <div key={s} style={{ display: "flex", alignItems: "center", gap: 6, background: C.cinzaF, borderRadius: 20, padding: "5px 12px 5px 8px" }}>
+                      <Badge label={statusLabel[s] || s} cor={statusCor[s] || C.cinzaT} />
+                      <span style={{ fontSize: 13, fontWeight: 700, color: C.preto }}>{count}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ width: 1, background: C.cinzaE }} />
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {urgenciaBreakdown.map(([u, count]) => (
+                    <div key={u} style={{ display: "flex", alignItems: "center", gap: 6, background: C.cinzaF, borderRadius: 20, padding: "5px 12px 5px 8px" }}>
+                      <Badge label={urgenciaLabel[u] || u} cor={urgenciaCor[u] || C.cinzaT} />
+                      <span style={{ fontSize: 13, fontWeight: 700, color: C.preto }}>{count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+
+      {pdfHtml && <PdfViewerOverlay html={pdfHtml} onClose={() => setPdfHtml(null)} />}
+    </div>
+  );
+};
+
+// =============================================
 // MANUTENÇÕES DO DONO
 // =============================================
 const ManutencoesDono = ({ farmacias }) => {
@@ -2837,13 +3338,7 @@ export default function App() {
         case "farmacias": return <GerenciarFarmacias farmacias={farmacias} onAtualizar={carregarDados} />;
         case "laboratorios": return <GerenciarLaboratorios laboratorios={laboratorios} onAtualizar={carregarDados} />;
         case "previsao": return <Previsao isDono={true} farmacias={farmacias} laboratorios={laboratorios} />;
-        case "graficos": return (
-          <div>
-            <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Relatórios</h2>
-            <p style={{ margin: "0 0 28px", color: C.cinzaT }}>Em breve: gráficos e relatório mensal automático</p>
-            <Card><p style={{ color: C.cinzaT, textAlign: "center" }}>📊 Módulo de relatórios em desenvolvimento.</p></Card>
-          </div>
-        );
+        case "graficos": return <Relatorios farmacias={farmacias} />;
         default: return null;
       }
     } else {
