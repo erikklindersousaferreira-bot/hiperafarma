@@ -173,6 +173,7 @@ const Icon = ({ name, size = 20, color = "currentColor" }) => {
     laboratorio: <><line x1="9" y1="3" x2="15" y2="3"/><polyline points="9,3 5,20 19,20 15,3"/><line x1="7" y1="13" x2="17" y2="13"/></>,
     hamburger: <><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></>,
     deposito: <><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3.27 8L12 13l8.73-5"/><line x1="12" y1="22" x2="12" y2="13"/></>,
+    download: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></>,
     repetir: <><polyline points="23,4 23,10 17,10"/><polyline points="1,20 1,14 7,14"/><path d="M3.51 9a9 9 0 0114.13-3.36L23 10M1 14l5.36 4.36A9 9 0 0020.49 15"/></>,
   };
   return (
@@ -2824,7 +2825,71 @@ const GraficoRanking = ({ dados, cor, unidade = "un." }) => {
   );
 };
 
-const Relatorios = ({ farmacias }) => {
+// Exporta o cadastro completo de produtos em CSV (separador ";" + BOM UTF-8), formato que o
+// Excel em português abre direto com acentos corretos e que os sistemas de farmácia importam.
+// O cadastro de produtos não guarda o laboratório (laboratorio_id está vazio em todos), então
+// o laboratório e as estatísticas de pedido vêm do histórico de pedido_itens — o item mais
+// recente de cada produto define o laboratório mostrado.
+const legadoCategoriaLabel = { generico: "Genéricos", etico: "Éticos", fralda: "Fraldas", leite: "Leites", suplemento: "Suplementos", preservativo: "Preservativos", bebida: "Bebidas", equipamento: "Equipamento", floral: "Floral" };
+const csvCampo = v => {
+  const s = v == null ? "" : String(v);
+  return /[";\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+const exportarProdutosCSV = async (laboratorios) => {
+  const [produtos, itens] = await Promise.all([
+    sbAll("produtos?select=id,nome,categoria,laboratorio_id,criado_em&order=nome.asc"),
+    sbAll("pedido_itens?select=produto_id,nome_produto,laboratorio_id,nome_laboratorio,quantidade,criado_em&order=criado_em.desc"),
+  ]);
+  const labPorId = new Map(laboratorios.map(l => [l.id, l.nome]));
+  const statsPorId = new Map();
+  const statsPorNome = new Map();
+  for (const it of itens) {
+    const labItem = it.nome_laboratorio || labPorId.get(it.laboratorio_id) || "";
+    const chaves = [];
+    if (it.produto_id) chaves.push([statsPorId, it.produto_id]);
+    if (it.nome_produto) chaves.push([statsPorNome, it.nome_produto.trim().toUpperCase()]);
+    for (const [mapa, chave] of chaves) {
+      let st = mapa.get(chave);
+      // itens vêm em ordem decrescente de data: o primeiro visto é o mais recente
+      if (!st) { st = { laboratorio: labItem, pedidos: 0, quantidade: 0, ultimo: it.criado_em }; mapa.set(chave, st); }
+      if (!st.laboratorio) st.laboratorio = labItem;
+      st.pedidos += 1;
+      st.quantidade += Number(it.quantidade) || 0;
+    }
+  }
+  const dataBR = d => d ? new Date(d).toLocaleDateString("pt-BR") : "";
+  const linhas = [["Produto", "Seção", "Laboratório", "Vezes pedido", "Qtd. total pedida", "Último pedido", "Cadastrado em"]];
+  for (const p of produtos) {
+    const st = statsPorId.get(p.id) || statsPorNome.get((p.nome || "").trim().toUpperCase());
+    linhas.push([
+      p.nome,
+      categoriaLabel[p.categoria] || legadoCategoriaLabel[p.categoria] || p.categoria || "",
+      labPorId.get(p.laboratorio_id) || st?.laboratorio || "",
+      st?.pedidos || 0,
+      st?.quantidade || 0,
+      dataBR(st?.ultimo),
+      dataBR(p.criado_em),
+    ]);
+  }
+  const csv = "\uFEFF" + linhas.map(l => l.map(csvCampo).join(";")).join("\r\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `produtos-cadastrados-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+const Relatorios = ({ farmacias, laboratorios }) => {
+  const [exportando, setExportando] = useState(false);
+  const exportarProdutos = async () => {
+    setExportando(true);
+    try { await exportarProdutosCSV(laboratorios); }
+    catch (e) { alert("Erro ao exportar produtos: " + e.message); }
+    finally { setExportando(false); }
+  };
   const isMobile = useMobile();
   const [periodo, setPeriodo] = useState("hoje");
   const [dataDe, setDataDe] = useState("");
@@ -3077,9 +3142,14 @@ const Relatorios = ({ farmacias }) => {
           <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Relatórios</h2>
           <p style={{ margin: 0, color: C.cinzaT, fontSize: 14 }}>Demanda por produto, laboratório e seção — {periodoInfo.label.toLowerCase()}</p>
         </div>
-        <Btn onClick={gerarPDFRelatorio} cor={C.vermelho} disabled={!itens.length}>
-          <Icon name="pdf" size={16} color={C.branco} /> Imprimir Relatório
-        </Btn>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Btn onClick={exportarProdutos} cor={C.verde} disabled={exportando}>
+            <Icon name="download" size={16} color={C.branco} /> {exportando ? "Exportando..." : "Exportar Produtos (Excel)"}
+          </Btn>
+          <Btn onClick={gerarPDFRelatorio} cor={C.vermelho} disabled={!itens.length}>
+            <Icon name="pdf" size={16} color={C.branco} /> Imprimir Relatório
+          </Btn>
+        </div>
       </div>
 
       <Card style={{ marginBottom: 20, padding: 16 }}>
@@ -3397,7 +3467,7 @@ export default function App() {
         case "farmacias": return <GerenciarFarmacias farmacias={farmacias} onAtualizar={carregarDados} />;
         case "laboratorios": return <GerenciarLaboratorios laboratorios={laboratorios} onAtualizar={carregarDados} />;
         case "previsao": return <Previsao isDono={true} farmacias={farmacias} laboratorios={laboratorios} />;
-        case "graficos": return <Relatorios farmacias={farmacias} />;
+        case "graficos": return <Relatorios farmacias={farmacias} laboratorios={laboratorios} />;
         default: return null;
       }
     } else {
