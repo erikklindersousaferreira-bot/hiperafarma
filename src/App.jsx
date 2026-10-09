@@ -2031,6 +2031,8 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
   const [labDirection, setLabDirection] = useState({});
   const labRefs = useRef({});
   const [loading, setLoading] = useState(false);
+  // Pula a etapa do Depósito só para este envio; desligado por padrão.
+  const [enviarDiretoPedidos, setEnviarDiretoPedidos] = useState(false);
 
   const limparRascunho = () => {
     if (!window.confirm("Limpar os itens preenchidos nesta solicitação?")) return;
@@ -2062,7 +2064,9 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
     if (itens.some(i => !i.laboratorio_id)) { alert("Selecione o laboratório de todos os itens."); return; }
     setLoading(true);
     try {
-      const pedido = await sb("pedidos", { method: "POST", body: JSON.stringify({ farmacia_id: farmaciaId, urgencia, tipo_pedido: tipoPedido, observacao }) });
+      const novoPedido = { farmacia_id: farmaciaId, urgencia, tipo_pedido: tipoPedido, observacao };
+      if (enviarDiretoPedidos) { novoPedido.liberado_deposito = true; novoPedido.liberado_deposito_em = new Date().toISOString(); }
+      const pedido = await sb("pedidos", { method: "POST", body: JSON.stringify(novoPedido) });
       const pedidoId = pedido[0].id;
 
       for (const item of itens) {
@@ -2077,6 +2081,7 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
       }
 
       await sb("logs", { method: "POST", body: JSON.stringify({ farmacia_id: farmaciaId, pedido_id: pedidoId, acao: "Pedido criado", detalhes: `${itens.length} itens` }) });
+      if (enviarDiretoPedidos) await sb("logs", { method: "POST", body: JSON.stringify({ farmacia_id: farmaciaId, pedido_id: pedidoId, acao: "Pedido enviado direto para Pedidos (sem Depósito)" }) });
       onEnviado();
     } catch (e) { alert("Erro ao salvar: " + e.message); }
     setLoading(false);
@@ -2189,6 +2194,13 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
         <Btn onClick={addItem} outline cor={C.azul}><Icon name="mais" size={16} color={C.azul} /> Adicionar Item</Btn>
         <Btn onClick={limparRascunho} outline cor={C.vermelho}>Limpar rascunho</Btn>
         <Btn onClick={salvar} disabled={loading} cor={C.azul}>{loading ? "Enviando..." : "Enviar Pedido"}</Btn>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, color: C.cinzaP, userSelect: "none" }}>
+          <input type="checkbox" checked={enviarDiretoPedidos} onChange={e => setEnviarDiretoPedidos(e.target.checked)} style={{ position: "absolute", opacity: 0, width: 0, height: 0 }} />
+          <span style={{ position: "relative", width: 36, height: 20, borderRadius: 20, background: enviarDiretoPedidos ? C.azul : C.cinzaD, transition: "background .15s", flexShrink: 0 }}>
+            <span style={{ position: "absolute", top: 2, left: enviarDiretoPedidos ? 18 : 2, width: 16, height: 16, borderRadius: "50%", background: C.branco, boxShadow: "0 1px 3px rgba(0,0,0,0.2)", transition: "left .15s" }} />
+          </span>
+          Enviar direto para Pedidos
+        </label>
       </div>
     </div>
   );
