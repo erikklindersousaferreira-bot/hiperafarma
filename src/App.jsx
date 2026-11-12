@@ -138,6 +138,26 @@ const qtdPdfLabel = (item) => {
   return `${item.quantidade} ${item.quantidade === 1 ? singular : plural}`;
 };
 
+const normalizarNomeProduto = s => String(s || "").replace(/\s+/g, " ").trim().toUpperCase();
+
+// Junta, para o PDF, as linhas do mesmo produto (mesmo nome, laboratório e unidade) somando
+// as quantidades — o mesmo produto vinha repetido quando a farmácia o lançava duas vezes ou
+// quando havia vários pedidos pendentes dela. `chaveExtra` separa grupos (ex.: por farmácia).
+const juntarItensIguais = (itens, chaveExtra = () => "") => {
+  const grupos = new Map();
+  itens.forEach(item => {
+    const chave = [normalizarNomeProduto(item.nome_produto), item.nome_laboratorio || "", item.unidade_medida || "", chaveExtra(item)].join("|");
+    const existente = grupos.get(chave);
+    if (existente) {
+      existente.quantidade = (Number(existente.quantidade) || 0) + (Number(item.quantidade) || 0);
+      existente.pedidosOrigem.add(item.pedido_id);
+    } else {
+      grupos.set(chave, { ...item, pedidosOrigem: new Set([item.pedido_id]) });
+    }
+  });
+  return [...grupos.values()];
+};
+
 const escHtml = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 const MobileCtx = createContext(false);
@@ -885,7 +905,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     const horaStr = new Date().toLocaleString("pt-BR");
 
     const grupos = {};
-    itensPedido.forEach(item => {
+    juntarItensIguais(itensPedido).forEach(item => {
       const key = item.nome_laboratorio || "__sem_lab__";
       if (!grupos[key]) grupos[key] = [];
       grupos[key].push(item);
@@ -972,7 +992,22 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
 
       const filtroLab = labPDF ? `laboratorio_id=eq.${labPDF}&` : "";
       const filtroSecaoPDF = filtroSecao ? `categoria=eq.${filtroSecao}&` : "";
-      const itens = await sb(`pedido_itens?${filtroLab}${filtroSecaoPDF}pedido_id=in.(${pendingIds.join(",")})&order=nome_laboratorio.asc,nome_produto.asc`);
+      // Busca em lotes de pedidos (um "in.(...)" com centenas de IDs estoura o tamanho da URL)
+      // e pagina cada lote — sem isso o servidor cortava em 1000 linhas e itens sumiam do PDF.
+      const LOTE = 100;
+      let itensBrutos = [];
+      for (let i = 0; i < pendingIds.length; i += LOTE) {
+        const lote = pendingIds.slice(i, i + LOTE);
+        itensBrutos = itensBrutos.concat(await sbAll(`pedido_itens?${filtroLab}${filtroSecaoPDF}pedido_id=in.(${lote.join(",")})`));
+      }
+
+      const farmaciaDoItem = item => pedidos.find(p => p.id === item.pedido_id)?.farmacia_id || "";
+      const itens = juntarItensIguais(itensBrutos, farmaciaDoItem).sort((a, b) => {
+        // Mesma ordem de antes (laboratório, depois produto), com "Sem Laboratório" no fim.
+        if (!a.nome_laboratorio !== !b.nome_laboratorio) return a.nome_laboratorio ? -1 : 1;
+        return (a.nome_laboratorio || "").localeCompare(b.nome_laboratorio || "", "pt-BR")
+          || normalizarNomeProduto(a.nome_produto).localeCompare(normalizarNomeProduto(b.nome_produto), "pt-BR");
+      });
 
       if (!itens.length) {
         alert(lab ? `Nenhum item pendente para o laboratório "${lab.nome}" com os filtros selecionados.` : "Nenhum item pendente ou em andamento encontrado com os filtros selecionados.");
@@ -995,11 +1030,11 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
       ].filter(Boolean).join(" — ");
 
       const linhaItem = (item, i) => {
-        const pedido = pedidos.find(p => p.id === item.pedido_id);
-        const farm = farmacias.find(f => f.id === pedido?.farmacia_id);
+        const farm = farmacias.find(f => f.id === farmaciaDoItem(item));
+        const qtdPedidos = item.pedidosOrigem.size;
         return `<tr>
           <td>${i + 1}</td>
-          <td><strong>${escHtml(item.nome_produto)}</strong></td>
+          <td><strong>${escHtml(item.nome_produto)}</strong>${qtdPedidos > 1 ? ` <span class="multi">(somado de ${qtdPedidos} pedidos)</span>` : ""}</td>
           <td>${escHtml(categoriaLabel[item.categoria] || item.categoria)}</td>
           <td>${escHtml(farm?.nome || "—")}</td>
           <td style="text-align:center;font-weight:700;color:#1A3A8F">${escHtml(qtdPdfLabel(item))}</td>
@@ -1058,6 +1093,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     tr { page-break-inside: avoid; break-inside: avoid; }
     .footer { margin-top: 40px; font-size: 10px; color: #6B7A99; text-align: center; border-top: 1px solid #E8ECF4; padding-top: 16px; }
     .total-row td { font-weight: 700; background: #EFF6FF; border-top: 2px solid #1A3A8F; }
+    .multi { font-size: 10px; font-weight: 400; color: #6B7A99; }
     @media print { body { padding: 20px; } }
   </style>
 </head>
@@ -2062,6 +2098,14 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
   const salvar = async () => {
     if (itens.some(i => !i.nome)) { alert("Preencha o nome de todos os itens."); return; }
     if (itens.some(i => !i.laboratorio_id)) { alert("Selecione o laboratório de todos os itens."); return; }
+    const posicoesPorNome = {};
+    itens.forEach((it, idx) => { (posicoesPorNome[normalizarNomeProduto(it.nome)] ||= []).push(idx + 1); });
+    const repetidos = Object.entries(posicoesPorNome).filter(([, pos]) => pos.length > 1);
+    if (repetidos.length) {
+      alert("Há produtos repetidos nesta solicitação. Deixe cada produto uma vez só, somando as quantidades:\n\n"
+        + repetidos.map(([nome, pos]) => `• ${nome} — itens #${pos.join(", #")}`).join("\n"));
+      return;
+    }
     setLoading(true);
     try {
       const novoPedido = { farmacia_id: farmaciaId, urgencia, tipo_pedido: tipoPedido, observacao };
@@ -3434,7 +3478,7 @@ export default function App() {
       const [farms, labs, peds, mans] = await Promise.all([
         sb("farmacias?order=nome.asc"),
         sb("laboratorios?order=nome.asc"),
-        sb("pedidos?order=criado_em.desc"),
+        sbAll("pedidos?order=criado_em.desc"),
         sb("manutencoes?order=criado_em.desc&status=eq.aberto"),
       ]);
       setFarmacias(farms);
