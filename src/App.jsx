@@ -502,6 +502,302 @@ const Login = ({ onLogin }) => {
 // =============================================
 // SIDEBAR
 // =============================================
+// =============================================
+// ESTOQUE DAS FARMÁCIAS (dados que vêm do ERP: erp_estoque, erp_vendas_dia, erp_reposicao_regras)
+// Só leitura — as regras de reposição são configuradas no ERP.
+// =============================================
+const COR_AUTO = "#7C3AED";
+
+const AutoBadge = () => (
+  <span style={{ background: COR_AUTO, color: C.branco, padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, letterSpacing: 0.4, display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
+    <Icon name="repetir" size={12} color={C.branco} /> REPOSIÇÃO AUTOMÁTICA
+  </span>
+);
+
+const fmtQtd = (v) => (v === null || v === undefined ? "—" : Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 2 }));
+const tempoAtras = (iso) => {
+  if (!iso) return "nunca";
+  const min = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min} min`;
+  if (min < 1440) return `há ${Math.round(min / 60)} h`;
+  return new Date(iso).toLocaleDateString("pt-BR");
+};
+
+const EstoqueFarmacias = ({ farmacias }) => {
+  const isMobile = useMobile();
+  const [resumo, setResumo] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [sel, setSel] = useState(null);
+
+  useEffect(() => {
+    sb("erp_estoque_resumo?select=*")
+      .then((rows) => setResumo(Object.fromEntries(rows.map((r) => [String(r.farmacia_id), r]))))
+      .catch(() => setResumo({}))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (sel) return <EstoqueFarmaciaDetalhe farmacia={sel} resumo={resumo[String(sel.id)]} onVoltar={() => setSel(null)} />;
+
+  const lista = [...farmacias].filter((f) => f.ativa !== false).sort((a, b) => Number(Boolean(resumo[String(b.id)])) - Number(Boolean(resumo[String(a.id)])) || a.nome.localeCompare(b.nome));
+
+  return (
+    <div>
+      <h2 style={{ margin: "0 0 6px", color: C.azul, fontSize: isMobile ? 20 : 24 }}>Estoque das Farmácias</h2>
+      <p style={{ margin: "0 0 20px", color: C.cinzaT, fontSize: 14 }}>Estoque, reposição programada e pedidos automáticos de cada farmácia. Os dados vêm do ERP sozinhos (a cada venda e de hora em hora).</p>
+      {loading ? (
+        <Card><p style={{ margin: 0, color: C.cinzaT, textAlign: "center" }}>Carregando…</p></Card>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
+          {lista.map((f) => {
+            const r = resumo[String(f.id)];
+            return (
+              <Card key={f.id} style={{ padding: 18, cursor: r ? "pointer" : "default", opacity: r ? 1 : 0.6 }}>
+                <div onClick={() => r && setSel(f)}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ width: 42, height: 42, borderRadius: 12, background: C.azul + "15", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <Icon name="farmacias" size={20} color={C.azul} />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 800, color: C.preto, fontSize: 15 }}>{f.nome}</div>
+                      <div style={{ fontSize: 12, color: C.cinzaT }}>{r ? `Atualizado ${tempoAtras(r.atualizado_em)}` : "Ainda não está no ERP"}</div>
+                    </div>
+                  </div>
+                  {r ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 14 }}>
+                      {[
+                        ["Com estoque", r.com_estoque, C.azul],
+                        ["No ponto", r.no_ponto, r.no_ponto > 0 ? C.vermelho : C.verde],
+                        ["Zerados", r.zerados, C.cinzaT],
+                      ].map(([l, v, cor]) => (
+                        <div key={l} style={{ background: C.cinzaF, borderRadius: 10, padding: "8px 6px", textAlign: "center" }}>
+                          <div style={{ fontSize: 18, fontWeight: 800, color: cor }}>{Number(v).toLocaleString("pt-BR")}</div>
+                          <div style={{ fontSize: 11, color: C.cinzaT }}>{l}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const EstoqueFarmaciaDetalhe = ({ farmacia, resumo, onVoltar }) => {
+  const isMobile = useMobile();
+  const fid = encodeURIComponent(String(farmacia.id));
+  const [aba, setAba] = useState("ponto");
+  const [linhas, setLinhas] = useState([]);
+  const [busca, setBusca] = useState("");
+  const [vendas, setVendas] = useState({});
+  const [regras, setRegras] = useState([]);
+  const [pedidos, setPedidos] = useState([]);
+  const [pedidoAberto, setPedidoAberto] = useState(null);
+  const [itens, setItens] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  // Vendas dos últimos 30 dias por produto (média de saída).
+  useEffect(() => {
+    const desde = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    sbAll(`erp_vendas_dia?farmacia_id=eq.${fid}&dia=gte.${desde}&select=chave,quantidade`)
+      .then((rows) => {
+        const m = {};
+        rows.forEach((r) => { m[r.chave] = (m[r.chave] || 0) + Number(r.quantidade); });
+        setVendas(m);
+      })
+      .catch(() => {});
+    sb(`erp_reposicao_regras?farmacia_id=eq.${fid}&order=tipo.desc,alvo.asc`).then(setRegras).catch(() => setRegras([]));
+  }, [fid]);
+
+  useEffect(() => {
+    if (aba === "regras") return;
+    if (aba === "pedidos") {
+      setLoading(true);
+      sb(`pedidos?farmacia_id=eq.${fid}&origem=eq.automatica&order=criado_em.desc&limit=30`).then(setPedidos).catch(() => setPedidos([])).finally(() => setLoading(false));
+      return;
+    }
+    const t = setTimeout(() => {
+      setLoading(true);
+      let path;
+      const termo = busca.trim();
+      if (termo.length >= 2) path = `erp_estoque?farmacia_id=eq.${fid}&nome_produto=ilike.${encodeURIComponent("*" + termo + "*")}&order=nome_produto.asc&limit=150`;
+      else if (aba === "ponto") path = `erp_estoque_no_ponto?farmacia_id=eq.${fid}&order=quantidade.asc&limit=500`;
+      else if (aba === "zerados") path = `erp_estoque?farmacia_id=eq.${fid}&quantidade=lte.0&order=nome_produto.asc&limit=500`;
+      else path = `erp_estoque?farmacia_id=eq.${fid}&quantidade=gt.0&order=nome_produto.asc&limit=300`;
+      sb(path).then(setLinhas).catch(() => setLinhas([])).finally(() => setLoading(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [aba, busca, fid]);
+
+  const abrirPedido = async (p) => {
+    setPedidoAberto(p);
+    setItens([]);
+    try { setItens(await sb(`pedido_itens?pedido_id=eq.${p.id}&order=nome_produto.asc`)); } catch {}
+  };
+
+  const abas = [
+    { id: "ponto", label: `No ponto de reposição${resumo ? ` (${resumo.no_ponto})` : ""}` },
+    { id: "estoque", label: "Estoque" },
+    { id: "zerados", label: "Zerados" },
+    { id: "regras", label: `Reposição programada (${regras.length})` },
+    { id: "pedidos", label: "Pedidos automáticos" },
+  ];
+
+  const th = { textAlign: "left", fontSize: 11, color: C.cinzaT, textTransform: "uppercase", letterSpacing: 0.5, padding: "8px 10px", borderBottom: `1px solid ${C.cinzaE}` };
+  const td = { padding: "9px 10px", borderBottom: `1px solid ${C.cinzaE}`, fontSize: 13, color: C.cinzaP };
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <Btn onClick={onVoltar} outline cor={C.cinzaT} small>← Farmácias</Btn>
+        <div>
+          <h2 style={{ margin: 0, color: C.azul, fontSize: isMobile ? 18 : 22 }}>{farmacia.nome}</h2>
+          <div style={{ fontSize: 12, color: C.cinzaT }}>Estoque atualizado {tempoAtras(resumo?.atualizado_em)}</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 14 }}>
+        {abas.map((a) => (
+          <button key={a.id} onClick={() => { setAba(a.id); setBusca(""); }}
+            style={{ border: "none", cursor: "pointer", whiteSpace: "nowrap", padding: "9px 14px", borderRadius: 10, fontFamily: "inherit", fontWeight: 700, fontSize: 13,
+              background: aba === a.id ? C.azul : C.branco, color: aba === a.id ? C.branco : C.cinzaP, boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+            {a.label}
+          </button>
+        ))}
+      </div>
+
+      {["ponto", "estoque", "zerados"].includes(aba) && (
+        <Card style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: 12, borderBottom: `1px solid ${C.cinzaE}` }}>
+            <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar produto pelo nome…"
+              style={{ width: "100%", padding: "10px 12px", border: `1.5px solid ${C.cinzaD}`, borderRadius: 10, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} />
+          </div>
+          {loading ? (
+            <p style={{ margin: 0, padding: 20, color: C.cinzaT, textAlign: "center" }}>Carregando…</p>
+          ) : linhas.length === 0 ? (
+            <p style={{ margin: 0, padding: 20, color: C.cinzaT, textAlign: "center" }}>{aba === "ponto" ? "Nenhum produto no ponto de reposição." : "Nada encontrado."}</p>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    <th style={th}>Produto</th>
+                    <th style={{ ...th, textAlign: "right" }}>Estoque</th>
+                    <th style={{ ...th, textAlign: "right" }}>Pede em</th>
+                    <th style={{ ...th, textAlign: "right" }}>Máximo</th>
+                    <th style={{ ...th, textAlign: "right" }}>Vendeu 30 dias</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {linhas.map((l) => {
+                    const noPonto = l.repor_em !== null && Number(l.quantidade) <= Number(l.repor_em);
+                    return (
+                      <tr key={l.chave} style={{ background: noPonto ? C.vermelho + "08" : "transparent" }}>
+                        <td style={{ ...td, fontWeight: 600, color: C.preto }}>{l.nome_produto}</td>
+                        <td style={{ ...td, textAlign: "right", fontWeight: 800, color: Number(l.quantidade) <= 0 ? C.vermelho : noPonto ? C.laranja : C.verde }}>{fmtQtd(l.quantidade)}</td>
+                        <td style={{ ...td, textAlign: "right" }}>{fmtQtd(l.repor_em)}</td>
+                        <td style={{ ...td, textAlign: "right" }}>{fmtQtd(l.maximo)}</td>
+                        <td style={{ ...td, textAlign: "right" }}>{fmtQtd(vendas[l.chave] || 0)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {aba === "regras" && (
+        <Card style={{ padding: 0, overflow: "hidden" }}>
+          <p style={{ margin: 0, padding: "12px 14px", fontSize: 13, color: C.cinzaT, borderBottom: `1px solid ${C.cinzaE}` }}>
+            Quando o estoque chega no "pede em", o pedido automático é criado sozinho. As regras são configuradas no ERP (Configurações → Reposição automática). Regra da farmácia vale no lugar da geral.
+          </p>
+          {regras.length === 0 ? (
+            <p style={{ margin: 0, padding: 20, color: C.cinzaT, textAlign: "center" }}>Nenhuma reposição programada pra essa farmácia.</p>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    <th style={th}>Tipo</th>
+                    <th style={th}>Produto / categoria</th>
+                    <th style={{ ...th, textAlign: "right" }}>Máximo</th>
+                    <th style={{ ...th, textAlign: "right" }}>Pede em</th>
+                    <th style={th}>Vale pra</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {regras.map((r) => (
+                    <tr key={r.regra_id}>
+                      <td style={td}>{r.tipo === "product" ? "Produto" : "Categoria"}</td>
+                      <td style={{ ...td, fontWeight: 600, color: C.preto }}>{r.alvo}</td>
+                      <td style={{ ...td, textAlign: "right" }}>{fmtQtd(r.maximo)}</td>
+                      <td style={{ ...td, textAlign: "right" }}>{fmtQtd(r.repor_em)}</td>
+                      <td style={td}><Badge label={r.origem === "farmacia" ? "Só esta farmácia" : "Geral"} cor={r.origem === "farmacia" ? COR_AUTO : C.cinzaT} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {aba === "pedidos" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {loading ? (
+            <Card><p style={{ margin: 0, color: C.cinzaT, textAlign: "center" }}>Carregando…</p></Card>
+          ) : pedidos.length === 0 ? (
+            <Card><p style={{ margin: 0, color: C.cinzaT, textAlign: "center" }}>Nenhum pedido automático ainda.</p></Card>
+          ) : pedidos.map((p) => (
+            <Card key={p.id} style={{ padding: 14, cursor: "pointer", borderLeft: `5px solid ${COR_AUTO}` }}>
+              <div onClick={() => abrirPedido(p)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontWeight: 700, color: C.preto }}>{new Date(p.criado_em).toLocaleString("pt-BR")}</div>
+                  <div style={{ fontSize: 12, color: C.cinzaT }}>{p.liberado_deposito ? "Foi direto pra Pedidos" : "Passa pelo Depósito"}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <AutoBadge />
+                  <Badge label={statusLabel[p.status] || p.status} cor={statusCor[p.status] || C.cinzaT} />
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {pedidoAberto && (
+        <Modal title="Pedido de reposição automática" onClose={() => setPedidoAberto(null)} width={720}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+            <AutoBadge />
+            <Badge label={statusLabel[pedidoAberto.status] || pedidoAberto.status} cor={statusCor[pedidoAberto.status] || C.cinzaT} />
+            <span style={{ fontSize: 12, color: C.cinzaT }}>{new Date(pedidoAberto.criado_em).toLocaleString("pt-BR")}</span>
+          </div>
+          {itens.length === 0 ? <p style={{ color: C.cinzaT }}>Carregando itens…</p> : (
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr><th style={th}>Produto</th><th style={{ ...th, textAlign: "right" }}>Qtd.</th><th style={th}>Motivo</th></tr></thead>
+              <tbody>
+                {itens.map((it) => (
+                  <tr key={it.id}>
+                    <td style={{ ...td, fontWeight: 600, color: C.preto }}>{it.nome_produto}<div style={{ fontSize: 11, color: C.cinzaT }}>{it.nome_laboratorio || ""}</div></td>
+                    <td style={{ ...td, textAlign: "right", fontWeight: 800 }}>{fmtQtd(it.quantidade)}</td>
+                    <td style={{ ...td, fontSize: 12 }}>{it.motivo}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+};
+
 const Sidebar = ({ ativo, setAtivo, isDono, farmacia, onSair, isOpen, onClose, aguardandoDeposito = 0 }) => {
   const isMobile = useMobile();
   const menuDono = [
@@ -510,6 +806,7 @@ const Sidebar = ({ ativo, setAtivo, isDono, farmacia, onSair, isOpen, onClose, a
     { id: "deposito", label: "Depósito", icon: "deposito", badge: aguardandoDeposito },
     { id: "manutencoes", label: "Manutenções", icon: "manutencao" },
     { id: "farmacias", label: "Farmácias", icon: "farmacias" },
+    { id: "estoque-farmacias", label: "Estoque das Farmácias", icon: "deposito" },
     { id: "laboratorios", label: "Laboratórios", icon: "laboratorio" },
     { id: "graficos", label: "Relatórios", icon: "grafico" },
     { id: "previsao", label: "Previsão", icon: "previsao" },
@@ -608,6 +905,7 @@ const BottomNav = ({ ativo, setAtivo, isDono }) => {
     { id: "dashboard", label: "Painel", icon: "home" },
     { id: "pedidos", label: "Pedidos", icon: "pedidos" },
     { id: "farmacias", label: "Farmácias", icon: "farmacias" },
+    { id: "estoque-farmacias", label: "Estoque", icon: "deposito" },
     { id: "graficos", label: "Relatórios", icon: "grafico" },
   ];
   const menuFarm = [
@@ -713,7 +1011,7 @@ const Dashboard = ({ stats, pedidos, manutencoes, farmacias, aguardandoDeposito 
                   <div style={{ fontSize: 12, color: C.cinzaT }}>{new Date(p.criado_em).toLocaleDateString("pt-BR")}</div>
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
-                  <Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
+                  {p.origem === "automatica" && <AutoBadge />}<Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
                   <Badge label={statusLabel[p.status]} cor={statusCor[p.status]} />
                 </div>
               </div>
@@ -1194,7 +1492,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
             {grupo.pedidos.map(p => {
               const farm = farmacias.find(f => f.id === p.farmacia_id);
               return (
-                <Card key={p.id} style={{ padding: 16, cursor: "pointer", transition: "box-shadow 0.15s" }} onClick={() => abrirPedido(p)}>
+                <Card key={p.id} style={{ padding: 16, cursor: "pointer", transition: "box-shadow 0.15s", ...(p.origem === "automatica" ? { borderLeft: `5px solid ${COR_AUTO}` } : {}) }} onClick={() => abrirPedido(p)}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                       <div style={{ width: 44, height: 44, background: urgenciaCor[p.urgencia] + "20", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1207,7 +1505,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
+                      {p.origem === "automatica" && <AutoBadge />}<Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
                       <Badge label={statusLabel[p.status]} cor={statusCor[p.status]} />
                       <BtnIcon icon="olho" cor={C.azulClaro} title="Visualizar pedido" onClick={e => { e.stopPropagation(); abrirPedido(p); }} />
                     </div>
@@ -1223,7 +1521,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
       {pedidoSelecionado && (
         <Modal title={`Pedido — ${farmacias.find(f => f.id === pedidoSelecionado.farmacia_id)?.nome}`} onClose={() => setPedidoSelecionado(null)} width={680}>
           <div style={{ display: "flex", gap: 8, marginBottom: 20, alignItems: "center", flexWrap: "wrap" }}>
-            <Badge label={urgenciaLabel[pedidoSelecionado.urgencia]} cor={urgenciaCor[pedidoSelecionado.urgencia]} />
+            {pedidoSelecionado.origem === "automatica" && <AutoBadge />}<Badge label={urgenciaLabel[pedidoSelecionado.urgencia]} cor={urgenciaCor[pedidoSelecionado.urgencia]} />
             <Badge label={statusLabel[pedidoSelecionado.status]} cor={statusCor[pedidoSelecionado.status]} />
             <span style={{ fontSize: 12, color: C.cinzaT }}>{new Date(pedidoSelecionado.criado_em).toLocaleString("pt-BR")}</span>
             <div style={{ marginLeft: "auto" }}>
@@ -1449,7 +1747,7 @@ const Deposito = ({ pedidos, farmacias, onAtualizar }) => {
           const farm = farmacias.find(f => f.id === p.farmacia_id);
           const tipo = p.tipo_pedido || "deposito";
           return (
-            <Card key={p.id} style={{ padding: 16, cursor: "pointer", transition: "box-shadow 0.15s" }} onClick={() => abrirPedido(p)}>
+            <Card key={p.id} style={{ padding: 16, cursor: "pointer", transition: "box-shadow 0.15s", ...(p.origem === "automatica" ? { borderLeft: `5px solid ${COR_AUTO}` } : {}) }} onClick={() => abrirPedido(p)}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                   <div style={{ width: 44, height: 44, background: urgenciaCor[p.urgencia] + "20", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1463,7 +1761,7 @@ const Deposito = ({ pedidos, farmacias, onAtualizar }) => {
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <Badge label={tipoPedidoLabel[tipo] || tipo} cor={tipoPedidoCor[tipo] || C.cinzaT} />
-                  <Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
+                  {p.origem === "automatica" && <AutoBadge />}<Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
                   <Badge label={statusLabel[p.status]} cor={statusCor[p.status]} />
                   <BtnIcon icon="olho" cor={C.azulClaro} title="Revisar pedido" onClick={e => { e.stopPropagation(); abrirPedido(p); }} />
                 </div>
@@ -1477,7 +1775,7 @@ const Deposito = ({ pedidos, farmacias, onAtualizar }) => {
         <Modal title={`Revisão de Estoque — ${farmacias.find(f => f.id === pedidoSelecionado.farmacia_id)?.nome}`} onClose={() => setPedidoSelecionado(null)} width={680}>
           <div style={{ display: "flex", gap: 8, marginBottom: 20, alignItems: "center", flexWrap: "wrap" }}>
             <Badge label={tipoPedidoLabel[pedidoSelecionado.tipo_pedido || "deposito"] || pedidoSelecionado.tipo_pedido} cor={tipoPedidoCor[pedidoSelecionado.tipo_pedido || "deposito"] || C.cinzaT} />
-            <Badge label={urgenciaLabel[pedidoSelecionado.urgencia]} cor={urgenciaCor[pedidoSelecionado.urgencia]} />
+            {pedidoSelecionado.origem === "automatica" && <AutoBadge />}<Badge label={urgenciaLabel[pedidoSelecionado.urgencia]} cor={urgenciaCor[pedidoSelecionado.urgencia]} />
             <Badge label={statusLabel[pedidoSelecionado.status]} cor={statusCor[pedidoSelecionado.status]} />
             <span style={{ fontSize: 12, color: C.cinzaT }}>{new Date(pedidoSelecionado.criado_em).toLocaleString("pt-BR")}</span>
           </div>
@@ -1716,7 +2014,7 @@ const GerenciarFarmacias = ({ farmacias, onAtualizar }) => {
                     <div style={{ fontSize: 11, color: C.cinzaT }}>{new Date(p.criado_em).toLocaleString("pt-BR")}</div>
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
+                    {p.origem === "automatica" && <AutoBadge />}<Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
                     <Badge label={statusLabel[p.status]} cor={statusCor[p.status]} />
                   </div>
                 </div>
@@ -2346,7 +2644,7 @@ const MeusPedidos = ({ farmaciaId, onRepetir }) => {
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
+                  {p.origem === "automatica" && <AutoBadge />}<Badge label={urgenciaLabel[p.urgencia]} cor={urgenciaCor[p.urgencia]} />
                   {p.liberado_deposito === false && <Badge label="Em conferência no Depósito" cor={C.laranja} />}
                   <Badge label={statusLabel[p.status]} cor={statusCor[p.status]} />
                   <BtnIcon icon="olho" cor={C.azulClaro} title="Ver pedido" onClick={e => { e.stopPropagation(); abrirPedido(p); }} />
@@ -2367,7 +2665,7 @@ const MeusPedidos = ({ farmaciaId, onRepetir }) => {
       {pedidoSel && (
         <Modal title={`Pedido #${pedidoSel.id.slice(0, 8).toUpperCase()}`} onClose={() => setPedidoSel(null)} width={600}>
           <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-            <Badge label={urgenciaLabel[pedidoSel.urgencia]} cor={urgenciaCor[pedidoSel.urgencia]} />
+            {pedidoSel.origem === "automatica" && <AutoBadge />}<Badge label={urgenciaLabel[pedidoSel.urgencia]} cor={urgenciaCor[pedidoSel.urgencia]} />
             {pedidoSel.liberado_deposito === false && <Badge label="Em conferência no Depósito" cor={C.laranja} />}
             <Badge label={statusLabel[pedidoSel.status]} cor={statusCor[pedidoSel.status]} />
           </div>
@@ -3521,6 +3819,7 @@ export default function App() {
         case "deposito": return <Deposito pedidos={pedidos} farmacias={farmacias} onAtualizar={carregarDados} />;
         case "manutencoes": return <ManutencoesDono farmacias={farmacias} />;
         case "farmacias": return <GerenciarFarmacias farmacias={farmacias} onAtualizar={carregarDados} />;
+        case "estoque-farmacias": return <EstoqueFarmacias farmacias={farmacias} />;
         case "laboratorios": return <GerenciarLaboratorios laboratorios={laboratorios} onAtualizar={carregarDados} />;
         case "previsao": return <Previsao isDono={true} farmacias={farmacias} laboratorios={laboratorios} />;
         case "graficos": return <Relatorios farmacias={farmacias} laboratorios={laboratorios} />;
