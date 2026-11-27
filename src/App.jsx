@@ -160,6 +160,21 @@ const juntarItensIguais = (itens, chaveExtra = () => "") => {
 
 const escHtml = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+// Código do produto (código do sistema da loja) pros itens de pedido: usa o gravado no item;
+// pedido antigo sem código busca no cadastro de produtos pelo produto_id.
+const preencherCodigos = async (itens) => {
+  const faltando = [...new Set(itens.filter(i => !i.codigo_produto && i.produto_id).map(i => i.produto_id))];
+  if (!faltando.length) return itens;
+  const codigos = {};
+  try {
+    for (let i = 0; i < faltando.length; i += 100) {
+      const lote = await sb(`produtos?select=id,codigo&codigo=not.is.null&id=in.(${faltando.slice(i, i + 100).join(",")})`);
+      lote.forEach(p => { codigos[p.id] = p.codigo; });
+    }
+  } catch { return itens; }
+  return itens.map(i => (i.codigo_produto || !codigos[i.produto_id] ? i : { ...i, codigo_produto: codigos[i.produto_id] }));
+};
+
 const MobileCtx = createContext(false);
 const useMobile = () => useContext(MobileCtx);
 
@@ -194,6 +209,7 @@ const Icon = ({ name, size = 20, color = "currentColor" }) => {
     hamburger: <><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></>,
     deposito: <><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3.27 8L12 13l8.73-5"/><line x1="12" y1="22" x2="12" y2="13"/></>,
     download: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></>,
+    produtos: <><path d="M16.5 9.4L7.5 4.21"/><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><path d="M3.27 6.96L12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></>,
     repetir: <><polyline points="23,4 23,10 17,10"/><polyline points="1,20 1,14 7,14"/><path d="M3.51 9a9 9 0 0114.13-3.36L23 10M1 14l5.36 4.36A9 9 0 0020.49 15"/></>,
   };
   return (
@@ -807,6 +823,7 @@ const Sidebar = ({ ativo, setAtivo, isDono, farmacia, onSair, isOpen, onClose, a
     { id: "manutencoes", label: "Manutenções", icon: "manutencao" },
     { id: "farmacias", label: "Farmácias", icon: "farmacias" },
     { id: "estoque-farmacias", label: "Estoque das Farmácias", icon: "deposito" },
+    { id: "produtos", label: "Produtos", icon: "produtos" },
     { id: "laboratorios", label: "Laboratórios", icon: "laboratorio" },
     { id: "graficos", label: "Relatórios", icon: "grafico" },
     { id: "previsao", label: "Previsão", icon: "previsao" },
@@ -1160,7 +1177,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     setComentarios([]);
     setLoadingItens(true);
     const [itens, comts] = await Promise.all([
-      sb(`pedido_itens?pedido_id=eq.${pedido.id}&order=criado_em.asc`),
+      sb(`pedido_itens?pedido_id=eq.${pedido.id}&order=criado_em.asc`).then(preencherCodigos),
       sb(`comentarios?pedido_id=eq.${pedido.id}&order=criado_em.asc`),
     ]);
     setItensPedido(itens);
@@ -1213,13 +1230,14 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
       const labNome = lab === "__sem_lab__" ? "Sem Laboratório" : lab;
       const linhas = items.map((item, i) => `<tr>
           <td>${i + 1}</td>
+          <td class="cod">${escHtml(item.codigo_produto || "—")}</td>
           <td><strong>${escHtml(item.nome_produto)}</strong></td>
           <td>${escHtml(categoriaLabel[item.categoria] || item.categoria)}</td>
           <td style="text-align:center;font-weight:700;color:#1A3A8F">${escHtml(qtdPdfLabel(item))}</td>
         </tr>`).join("");
       return `<div class="lab-section">
       <div class="lab-header">${escHtml(labNome)}</div>
-      <table><thead><tr><th>#</th><th>Produto</th><th>Categoria</th><th>Qtd</th></tr></thead>
+      <table><thead><tr><th>#</th><th>Código</th><th>Produto</th><th>Categoria</th><th>Qtd</th></tr></thead>
       <tbody>${linhas}</tbody></table></div>`;
     }).join("");
 
@@ -1246,6 +1264,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
     tr:nth-child(even) td { background: #F4F6FA; }
     tr { page-break-inside: avoid; break-inside: avoid; }
     .footer { margin-top: 40px; font-size: 10px; color: #6B7A99; text-align: center; border-top: 1px solid #E8ECF4; padding-top: 16px; }
+    .cod { font-family: "Courier New", monospace; font-weight: 700; white-space: nowrap; }
     @media print { body { padding: 20px; } }
   </style>
 </head>
@@ -1298,6 +1317,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
         const lote = pendingIds.slice(i, i + LOTE);
         itensBrutos = itensBrutos.concat(await sbAll(`pedido_itens?${filtroLab}${filtroSecaoPDF}pedido_id=in.(${lote.join(",")})`));
       }
+      itensBrutos = await preencherCodigos(itensBrutos);
 
       const farmaciaDoItem = item => pedidos.find(p => p.id === item.pedido_id)?.farmacia_id || "";
       const itens = juntarItensIguais(itensBrutos, farmaciaDoItem).sort((a, b) => {
@@ -1332,6 +1352,7 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
         const qtdPedidos = item.pedidosOrigem.size;
         return `<tr>
           <td>${i + 1}</td>
+          <td class="cod">${escHtml(item.codigo_produto || "—")}</td>
           <td><strong>${escHtml(item.nome_produto)}</strong>${qtdPedidos > 1 ? ` <span class="multi">(somado de ${qtdPedidos} pedidos)</span>` : ""}</td>
           <td>${escHtml(categoriaLabel[item.categoria] || item.categoria)}</td>
           <td>${escHtml(farm?.nome || "—")}</td>
@@ -1340,10 +1361,10 @@ const PedidosDono = ({ pedidos, farmacias, laboratorios, onAtualizar }) => {
       };
 
       const tabelaLab = (labNome, items) => `<table>
-      <thead><tr><th>#</th><th>Produto</th><th>Categoria</th><th>Farmácia</th><th>Qtd</th></tr></thead>
+      <thead><tr><th>#</th><th>Código</th><th>Produto</th><th>Categoria</th><th>Farmácia</th><th>Qtd</th></tr></thead>
       <tbody>
         ${items.map((item, i) => linhaItem(item, i)).join("")}
-        <tr class="total-row"><td colspan="4">Total de itens</td><td style="text-align:center">${items.length}</td></tr>
+        <tr class="total-row"><td colspan="5">Total de itens</td><td style="text-align:center">${items.length}</td></tr>
       </tbody>
     </table>`;
 
@@ -2208,6 +2229,302 @@ const GerenciarLaboratorios = ({ laboratorios, onAtualizar }) => {
 };
 
 // =============================================
+// PRODUTOS (dono) — lista oficial de produtos, separada por categoria.
+// Cada produto tem o CÓDIGO (código interno do sistema da loja), que sai no PDF do pedido.
+// "Importar lista" lê a planilha operacional (CSV) e SUBSTITUI a lista: atualiza quem já
+// existe (pelo código, código de barras ou nome), cria os novos e esconde (ativo = false)
+// os que não estão na planilha — nada é apagado, os pedidos antigos continuam iguais.
+// =============================================
+const chaveTexto = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+// Categoria da planilha (nome do ERP) → chave daqui. As que não existem aqui vão pra mais próxima.
+const categoriaDaPlanilha = (cat, original) => {
+  const k = chaveTexto(cat);
+  const achada = Object.entries(categoriaLabel).find(([key, label]) => chaveTexto(label) === k || chaveTexto(key) === k);
+  if (achada) return achada[0];
+  const o = chaveTexto(original);
+  if (o === "pma" || o.includes("perfum")) return "perfumaria";
+  if (o.includes("sorvete")) return "mercearia";
+  return "varejo";
+};
+
+// CSV com ";" ou ",", aspas e BOM — tudo como texto (código não perde zero da frente).
+const lerCsv = (texto) => {
+  const t = texto.replace(/^﻿/, "");
+  const primeira = t.slice(0, Math.max(0, t.indexOf("\n")) || t.length);
+  const sep = (primeira.match(/;/g) || []).length >= (primeira.match(/,/g) || []).length ? ";" : ",";
+  const linhas = []; let linha = []; let cel = ""; let aspas = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (aspas) { if (c === '"') { if (t[i + 1] === '"') { cel += '"'; i++; } else aspas = false; } else cel += c; }
+    else if (c === '"') aspas = true;
+    else if (c === sep) { linha.push(cel); cel = ""; }
+    else if (c === "\n") { linha.push(cel.replace(/\r$/, "")); linhas.push(linha); linha = []; cel = ""; }
+    else cel += c;
+  }
+  if (cel || linha.length) { linha.push(cel.replace(/\r$/, "")); linhas.push(linha); }
+  const vivas = linhas.filter(l => l.some(x => x.trim() !== ""));
+  if (vivas.length < 2) return [];
+  const cab = vivas[0].map(h => chaveTexto(h));
+  return vivas.slice(1).map(l => { const o = {}; cab.forEach((h, i) => { o[h] = (l[i] || "").trim(); }); return o; });
+};
+
+const GerenciarProdutos = ({ laboratorios }) => {
+  const isMobile = useMobile();
+  const [produtos, setProdutos] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [secao, setSecao] = useState("todos");
+  const [busca, setBusca] = useState("");
+  const [limite, setLimite] = useState(100);
+  const [modal, setModal] = useState(null); // produto em edição ({} = novo)
+  const [salvando, setSalvando] = useState(false);
+  const [importacao, setImportacao] = useState(null); // { linhas, novos, atualizar, esconder, semCodigo }
+  const [progresso, setProgresso] = useState("");
+  const inputArquivo = useRef(null);
+
+  const carregar = useCallback(async () => {
+    setCarregando(true);
+    try { setProdutos(await sbAll("produtos?select=id,nome,categoria,laboratorio_id,codigo,codigo_barras,ativo&ativo=not.is.false&order=nome.asc")); }
+    catch (e) { alert("Erro ao carregar produtos: " + e.message); }
+    setCarregando(false);
+  }, []);
+  useEffect(() => { carregar(); }, [carregar]);
+
+  const labNome = useMemo(() => Object.fromEntries(laboratorios.map(l => [l.id, l.nome])), [laboratorios]);
+  const contagem = useMemo(() => {
+    const c = {}; produtos.forEach(p => { c[p.categoria] = (c[p.categoria] || 0) + 1; }); return c;
+  }, [produtos]);
+  const filtrados = useMemo(() => {
+    const termo = chaveTexto(busca);
+    return produtos.filter(p => (secao === "todos" || p.categoria === secao)
+      && (!termo || chaveTexto(p.nome).includes(termo) || (p.codigo || "") === busca.trim() || (p.codigo_barras || "") === busca.trim()));
+  }, [produtos, secao, busca]);
+
+  const salvar = async () => {
+    const p = modal;
+    if (!p.nome?.trim()) { alert("Informe o nome do produto."); return; }
+    const codigo = (p.codigo || "").trim();
+    if (codigo && produtos.some(x => x.codigo === codigo && x.id !== p.id)) { alert(`Já existe produto com o código ${codigo}.`); return; }
+    setSalvando(true);
+    try {
+      const corpo = { nome: p.nome.trim().toUpperCase(), categoria: p.categoria || "eticos", laboratorio_id: p.laboratorio_id || null,
+        codigo: codigo || null, codigo_barras: (p.codigo_barras || "").replace(/\D/g, "") || null, ativo: true, atualizado_em: new Date().toISOString() };
+      if (p.id) await sb(`produtos?id=eq.${p.id}`, { method: "PATCH", body: JSON.stringify(corpo) });
+      else await sb("produtos", { method: "POST", body: JSON.stringify(corpo) });
+      setModal(null);
+      await carregar();
+    } catch (e) { alert("Erro ao salvar: " + e.message); }
+    setSalvando(false);
+  };
+
+  const esconder = async (p) => {
+    if (!window.confirm(`Tirar "${p.nome}" da lista? Ele some da busca da solicitação; os pedidos antigos não mudam.`)) return;
+    try { await sb(`produtos?id=eq.${p.id}`, { method: "PATCH", body: JSON.stringify({ ativo: false, atualizado_em: new Date().toISOString() }) }); await carregar(); }
+    catch (e) { alert("Erro: " + e.message); }
+  };
+
+  // ---- Importação (substituir a lista) ----
+  const escolherArquivo = async (arquivo) => {
+    if (!arquivo) return;
+    if (!/\.csv$/i.test(arquivo.name)) { alert("Use a planilha em CSV (hiperafarma_importacao_operacional.csv)."); return; }
+    setProgresso("Lendo planilha…");
+    try {
+      const linhasCsv = lerCsv(await arquivo.text());
+      if (!linhasCsv.length || !("nome" in linhasCsv[0])) { setProgresso(""); alert("Planilha sem a coluna \"nome\". Use a planilha operacional da importação."); return; }
+      const labPorNome = new Map(laboratorios.map(l => [chaveTexto(l.nome), l.id]));
+      // uma linha por código (o último vence); sem código, pelo código de barras; sem nenhum, pelo nome
+      const porChave = new Map();
+      linhasCsv.forEach(l => {
+        const nome = (l.nome || "").trim();
+        if (nome.length < 2) return;
+        const codigo = (l.codigointernoorigem || l.codigo || "").trim();
+        const barras = (l.codigobarras || "").replace(/\D/g, "");
+        porChave.set(codigo ? "c:" + codigo : barras ? "b:" + barras : "n:" + normalizarNomeProduto(nome), {
+          nome: nome.toUpperCase(), codigo: codigo || null, codigo_barras: barras || null,
+          categoria: categoriaDaPlanilha(l.categoria, l.categoriaoriginal),
+          laboratorio_id: labPorNome.get(chaveTexto(l.laboratorio)) || null,
+        });
+      });
+      const linhas = [...porChave.values()];
+      // casa com a lista atual (inclui os escondidos, pra reaproveitar o mesmo cadastro)
+      const atuais = await sbAll("produtos?select=id,nome,codigo,codigo_barras,laboratorio_id,ativo");
+      const porCodigo = new Map(), porBarras = new Map(), porNome = new Map();
+      atuais.forEach(p => {
+        if (p.codigo) porCodigo.set(p.codigo, p);
+        if (p.codigo_barras) porBarras.set(p.codigo_barras, p);
+        const n = normalizarNomeProduto(p.nome);
+        if (!porNome.has(n)) porNome.set(n, p);
+      });
+      const usados = new Set(); const atualizar = []; const novos = [];
+      linhas.forEach(l => {
+        const p = [l.codigo && porCodigo.get(l.codigo), l.codigo_barras && porBarras.get(l.codigo_barras), porNome.get(normalizarNomeProduto(l.nome))]
+          .find(x => x && !usados.has(x.id));
+        if (p) { usados.add(p.id); atualizar.push({ ...l, id: p.id, laboratorio_id: l.laboratorio_id || p.laboratorio_id || null }); }
+        else novos.push(l);
+      });
+      const esconderIds = atuais.filter(p => p.ativo !== false && !usados.has(p.id)).map(p => p.id);
+      setImportacao({ total: linhas.length, atualizar, novos, esconderIds, nomeArquivo: arquivo.name });
+    } catch (e) { alert("Erro ao ler a planilha: " + e.message); }
+    setProgresso("");
+  };
+
+  const aplicarImportacao = async () => {
+    const { atualizar, novos, esconderIds } = importacao;
+    const agora = new Date().toISOString();
+    const LOTE = 500;
+    try {
+      for (let i = 0; i < atualizar.length; i += LOTE) {
+        setProgresso(`Atualizando… ${Math.min(i + LOTE, atualizar.length)} de ${atualizar.length}`);
+        const lote = atualizar.slice(i, i + LOTE).map(l => ({ id: l.id, nome: l.nome, categoria: l.categoria, laboratorio_id: l.laboratorio_id, codigo: l.codigo, codigo_barras: l.codigo_barras, ativo: true, atualizado_em: agora }));
+        await sb("produtos?on_conflict=id", { method: "POST", body: JSON.stringify(lote), prefer: "resolution=merge-duplicates,return=minimal" });
+      }
+      for (let i = 0; i < novos.length; i += LOTE) {
+        setProgresso(`Criando… ${Math.min(i + LOTE, novos.length)} de ${novos.length}`);
+        const lote = novos.slice(i, i + LOTE).map(l => ({ nome: l.nome, categoria: l.categoria, laboratorio_id: l.laboratorio_id, codigo: l.codigo, codigo_barras: l.codigo_barras, ativo: true, atualizado_em: agora }));
+        await sb("produtos", { method: "POST", body: JSON.stringify(lote), prefer: "return=minimal" });
+      }
+      for (let i = 0; i < esconderIds.length; i += 150) {
+        setProgresso(`Tirando da lista os que não estão na planilha… ${Math.min(i + 150, esconderIds.length)} de ${esconderIds.length}`);
+        await sb(`produtos?id=in.(${esconderIds.slice(i, i + 150).join(",")})`, { method: "PATCH", body: JSON.stringify({ ativo: false, atualizado_em: agora }), prefer: "return=minimal" });
+      }
+      alert(`Lista importada: ${atualizar.length} atualizados, ${novos.length} novos, ${esconderIds.length} tirados da lista.`);
+      setImportacao(null);
+      await carregar();
+    } catch (e) { alert("Erro na importação (o que já foi gravado fica; pode importar de novo que não duplica): " + e.message); }
+    setProgresso("");
+  };
+
+  const secoes = [{ value: "todos", label: `Todos (${produtos.length})` },
+    ...Object.entries(categoriaLabel).filter(([k]) => contagem[k]).map(([k, label]) => ({ value: k, label: `${label} (${contagem[k]})` }))];
+  const campo = { width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.cinzaD}`, fontSize: 14, color: C.preto, background: C.branco, boxSizing: "border-box", fontFamily: "inherit", outline: "none" };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: isMobile ? "stretch" : "center", flexDirection: isMobile ? "column" : "row", gap: 12, marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.preto }}>Produtos</h2>
+          <p style={{ margin: 0, color: C.cinzaT, fontSize: 14 }}>{carregando ? "Carregando…" : `${produtos.length} produtos na lista`}</p>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Btn onClick={() => inputArquivo.current?.click()} outline cor={C.azul} disabled={!!progresso}>
+            <Icon name="download" size={16} color={C.azul} /> Importar lista (CSV)
+          </Btn>
+          <Btn onClick={() => setModal({ categoria: secao !== "todos" ? secao : "eticos" })} cor={C.azul}>
+            <Icon name="mais" size={16} color={C.branco} /> Novo Produto
+          </Btn>
+          <input ref={inputArquivo} type="file" accept=".csv" style={{ display: "none" }} onChange={e => { escolherArquivo(e.target.files?.[0]); e.target.value = ""; }} />
+        </div>
+      </div>
+
+      {progresso && <Card style={{ marginBottom: 16 }}><span style={{ color: C.azul, fontWeight: 600, fontSize: 14 }}>{progresso}</span></Card>}
+
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 8, marginBottom: 12 }}>
+        {secoes.map(s => (
+          <button key={s.value} type="button" onClick={() => { setSecao(s.value); setLimite(100); }} style={{
+            whiteSpace: "nowrap", padding: "7px 14px", borderRadius: 20, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700,
+            border: `1.5px solid ${secao === s.value ? C.azul : C.cinzaD}`, background: secao === s.value ? C.azul : C.branco, color: secao === s.value ? C.branco : C.cinzaP,
+          }}>{s.label}</button>
+        ))}
+      </div>
+
+      <div style={{ position: "relative", maxWidth: 420, marginBottom: 16 }}>
+        <div style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display: "flex", pointerEvents: "none" }}>
+          <Icon name="lupa" size={16} color={C.cinzaT} />
+        </div>
+        <input value={busca} onChange={e => { setBusca(e.target.value); setLimite(100); }} placeholder="Buscar por nome, código ou código de barras..." style={{ ...campo, paddingLeft: 38 }} />
+      </div>
+
+      <Card style={{ padding: 0, overflow: "hidden" }}>
+        {filtrados.length === 0 ? (
+          <p style={{ color: C.cinzaT, textAlign: "center", margin: 0, padding: 24 }}>{carregando ? "Carregando…" : "Nenhum produto encontrado."}</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: C.cinzaE, textAlign: "left" }}>
+                  <th style={{ padding: "10px 14px" }}>Código</th>
+                  <th style={{ padding: "10px 14px" }}>Produto</th>
+                  {!isMobile && <th style={{ padding: "10px 14px" }}>Categoria</th>}
+                  {!isMobile && <th style={{ padding: "10px 14px" }}>Laboratório</th>}
+                  {!isMobile && <th style={{ padding: "10px 14px" }}>Cód. barras</th>}
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {filtrados.slice(0, limite).map(p => (
+                  <tr key={p.id} style={{ borderTop: `1px solid ${C.cinzaE}` }}>
+                    <td style={{ padding: "9px 14px", fontFamily: "monospace", fontWeight: 700, color: C.azul }}>{p.codigo || "—"}</td>
+                    <td style={{ padding: "9px 14px", fontWeight: 600, color: C.preto }}>{p.nome}</td>
+                    {!isMobile && <td style={{ padding: "9px 14px" }}><Badge label={categoriaLabel[p.categoria] || p.categoria} cor={categoriaCor[p.categoria] || C.cinzaT} /></td>}
+                    {!isMobile && <td style={{ padding: "9px 14px", color: C.cinzaP }}>{labNome[p.laboratorio_id] || "—"}</td>}
+                    {!isMobile && <td style={{ padding: "9px 14px", fontFamily: "monospace", color: C.cinzaT }}>{p.codigo_barras || "—"}</td>}
+                    <td style={{ padding: "6px 10px", whiteSpace: "nowrap", textAlign: "right" }}>
+                      <span style={{ display: "inline-flex", gap: 6 }}>
+                        <BtnIcon icon="lapis" cor={C.laranja} title="Editar" onClick={() => setModal({ ...p })} />
+                        <BtnIcon icon="lixeira" cor={C.vermelho} title="Tirar da lista" onClick={() => esconder(p)} />
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+      {filtrados.length > limite && (
+        <div style={{ textAlign: "center", marginTop: 12 }}>
+          <Btn onClick={() => setLimite(l => l + 200)} outline cor={C.azul} small>Mostrar mais ({filtrados.length - limite} restantes)</Btn>
+        </div>
+      )}
+
+      {modal && (
+        <Modal title={modal.id ? `Editar — ${modal.nome}` : "Novo Produto"} onClose={() => setModal(null)}>
+          <Input label="Nome do produto" value={modal.nome || ""} onChange={v => setModal(m => ({ ...m, nome: v }))} required />
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
+            <Input label="Código do produto" value={modal.codigo || ""} onChange={v => setModal(m => ({ ...m, codigo: v }))} placeholder="Código do sistema da loja" />
+            <Input label="Código de barras" value={modal.codigo_barras || ""} onChange={v => setModal(m => ({ ...m, codigo_barras: v }))} placeholder="Opcional" />
+          </div>
+          <Select label="Categoria" value={modal.categoria || "eticos"} onChange={v => setModal(m => ({ ...m, categoria: v }))} options={categoriaOptions} />
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.cinzaP, marginBottom: 6 }}>Laboratório</label>
+            <ComboboxLaboratorio value={modal.laboratorio_id || ""} onChange={v => setModal(m => ({ ...m, laboratorio_id: v }))} laboratorios={laboratorios} placeholder="Sem laboratório" />
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            <Btn onClick={salvar} disabled={salvando} cor={C.azul} full>
+              <Icon name="check" size={16} color={C.branco} /> {salvando ? "Salvando..." : modal.id ? "Salvar Alterações" : "Cadastrar Produto"}
+            </Btn>
+            <Btn onClick={() => setModal(null)} outline cor={C.cinzaT}>Cancelar</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {importacao && (
+        <Modal title="Importar lista de produtos" onClose={() => !progresso && setImportacao(null)} width={480}>
+          <p style={{ color: C.cinzaP, fontSize: 14, margin: "0 0 12px" }}><strong>{importacao.nomeArquivo}</strong> — {importacao.total} produtos na planilha.</p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 14 }}>
+            {[["Atualizados", importacao.atualizar.length, C.azulClaro], ["Novos", importacao.novos.length, C.verde], ["Saem da lista", importacao.esconderIds.length, C.vermelho]].map(([l, n, cor]) => (
+              <div key={l} style={{ background: cor + "12", borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ fontSize: 11, color: C.cinzaT }}>{l}</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: cor }}>{n}</div>
+              </div>
+            ))}
+          </div>
+          <p style={{ color: C.cinzaT, fontSize: 12, margin: "0 0 16px" }}>
+            A planilha passa a ser a lista de produtos. Os que saem da lista não são apagados: só deixam de aparecer na busca da solicitação. Pedidos antigos não mudam.
+          </p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Btn onClick={aplicarImportacao} disabled={!!progresso} cor={C.azul} full>
+              <Icon name="check" size={16} color={C.branco} /> {progresso ? "Importando..." : "Substituir a lista"}
+            </Btn>
+            <Btn onClick={() => setImportacao(null)} outline cor={C.cinzaT} disabled={!!progresso}>Cancelar</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// =============================================
 // NOVA SOLICITAÇÃO (farmácia)
 // =============================================
 const itemVazio = { nome: "", categoria: "eticos", laboratorio_id: "", quantidade: 1, unidade: "unidade", motivo: "esgotou" };
@@ -2376,13 +2693,17 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
   const buscarSugestoes = async (texto, index) => {
     setIndexAtivo(index);
     if (texto.length < 2) { setSugestoes([]); return; }
-    const res = await sb(`produtos?nome=ilike.${encodeURIComponent("%" + texto + "%")}&limit=6`);
+    const t = texto.trim();
+    // nome (contém), código ou código de barras (exatos); só produtos da lista atual
+    const res = /^\d+$/.test(t)
+      ? await sb(`produtos?ativo=not.is.false&or=(codigo.eq.${t},codigo_barras.eq.${t},nome.ilike.*${t}*)&order=nome.asc&limit=8`)
+      : await sb(`produtos?ativo=not.is.false&nome=ilike.${encodeURIComponent("%" + t + "%")}&order=nome.asc&limit=8`);
     setSugestoes(res);
   };
 
   const selecionarSugestao = (produto, index) => {
     const novos = [...itens];
-    novos[index] = { ...novos[index], nome: produto.nome, categoria: produto.categoria };
+    novos[index] = { ...novos[index], nome: produto.nome, categoria: produto.categoria, produto_id: produto.id, codigo: produto.codigo || "" };
     if (produto.laboratorio_id) novos[index].laboratorio_id = produto.laboratorio_id;
     setItens(novos);
     setSugestoes([]);
@@ -2412,14 +2733,17 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
       const pedidoId = pedido[0].id;
 
       for (const item of itens) {
-        let produtoId = null;
-        try {
-          const prods = await sb(`produtos?nome=ilike.${encodeURIComponent(item.nome)}&limit=1`);
-          if (prods.length > 0) produtoId = prods[0].id;
-        } catch {}
+        let produtoId = item.produto_id || null;
+        let codigoProduto = item.codigo || null;
+        if (!produtoId) {
+          try {
+            const prods = await sb(`produtos?select=id,codigo&nome=ilike.${encodeURIComponent(item.nome)}&order=ativo.desc.nullslast&limit=1`);
+            if (prods.length > 0) { produtoId = prods[0].id; codigoProduto = prods[0].codigo || null; }
+          } catch {}
+        }
 
         const lab = laboratorios.find(l => l.id === item.laboratorio_id);
-        await sb("pedido_itens", { method: "POST", body: JSON.stringify({ pedido_id: pedidoId, produto_id: produtoId, nome_produto: item.nome.toUpperCase(), categoria: item.categoria, laboratorio_id: item.laboratorio_id || null, nome_laboratorio: lab?.nome || null, quantidade: item.quantidade, unidade_medida: item.unidade || "unidade", motivo: item.motivo }) });
+        await sb("pedido_itens", { method: "POST", body: JSON.stringify({ pedido_id: pedidoId, produto_id: produtoId, codigo_produto: codigoProduto, nome_produto: item.nome.toUpperCase(), categoria: item.categoria, laboratorio_id: item.laboratorio_id || null, nome_laboratorio: lab?.nome || null, quantidade: item.quantidade, unidade_medida: item.unidade || "unidade", motivo: item.motivo }) });
       }
 
       await sb("logs", { method: "POST", body: JSON.stringify({ farmacia_id: farmaciaId, pedido_id: pedidoId, acao: "Pedido criado", detalhes: `${itens.length} itens` }) });
@@ -2452,11 +2776,12 @@ const NovaSolicitacaoForm = ({ draft, onChange, farmaciaId, laboratorios, onEnvi
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div style={{ position: "relative" }}>
-              <Input label="Nome do Produto" value={item.nome} onChange={v => { editItem(i, "nome", v); buscarSugestoes(v, i); }} placeholder="Digite para buscar..." required />
+              <Input label="Nome do Produto" value={item.nome} onChange={v => { setItens(itens.map((it, idx) => idx === i ? { ...it, nome: v, produto_id: null, codigo: "" } : it)); buscarSugestoes(v, i); }} placeholder="Digite para buscar..." required />
               {indexAtivo === i && sugestoes.length > 0 && (
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: C.branco, border: `1.5px solid ${C.cinzaD}`, borderRadius: 10, zIndex: 100, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
                   {sugestoes.map(s => (
                     <div key={s.id} onClick={() => selecionarSugestao(s, i)} style={{ padding: "10px 14px", cursor: "pointer", borderBottom: `1px solid ${C.cinzaE}`, fontSize: 13, color: C.preto }}>
+                      {s.codigo && <span style={{ fontFamily: "monospace", fontWeight: 700, color: C.azul, marginRight: 6 }}>{s.codigo}</span>}
                       {s.nome} <span style={{ color: C.cinzaT, fontSize: 11 }}>— {categoriaLabel[s.categoria]}</span>
                     </div>
                   ))}
@@ -2981,6 +3306,7 @@ const Previsao = ({ farmaciaId, isDono, farmacias, laboratorios }) => {
     tr:nth-child(even) td { background: #F4F6FA; }
     tr { page-break-inside: avoid; break-inside: avoid; }
     .footer { margin-top: 40px; font-size: 10px; color: #6B7A99; text-align: center; border-top: 1px solid #E8ECF4; padding-top: 16px; }
+    .cod { font-family: "Courier New", monospace; font-weight: 700; white-space: nowrap; }
     @media print { body { padding: 20px; } }
   </style>
 </head>
@@ -3439,6 +3765,7 @@ const Relatorios = ({ farmacias, laboratorios }) => {
     tr:nth-child(even) td { background: #F4F6FA; }
     tr { page-break-inside: avoid; break-inside: avoid; }
     .footer { margin-top: 40px; font-size: 10px; color: #6B7A99; text-align: center; border-top: 1px solid #E8ECF4; padding-top: 16px; }
+    .cod { font-family: "Courier New", monospace; font-weight: 700; white-space: nowrap; }
     @media print { body { padding: 20px; } }
   </style>
 </head>
@@ -3821,6 +4148,7 @@ export default function App() {
         case "farmacias": return <GerenciarFarmacias farmacias={farmacias} onAtualizar={carregarDados} />;
         case "estoque-farmacias": return <EstoqueFarmacias farmacias={farmacias} />;
         case "laboratorios": return <GerenciarLaboratorios laboratorios={laboratorios} onAtualizar={carregarDados} />;
+        case "produtos": return <GerenciarProdutos laboratorios={laboratorios} />;
         case "previsao": return <Previsao isDono={true} farmacias={farmacias} laboratorios={laboratorios} />;
         case "graficos": return <Relatorios farmacias={farmacias} laboratorios={laboratorios} />;
         default: return null;
